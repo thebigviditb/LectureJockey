@@ -1,5 +1,4 @@
 import Foundation
-import Security
 
 /// Classifies a dictation that no grammar rule matched, using TypeSafe's Jev
 /// decision model: it scores a fixed list of choices and returns a probability
@@ -243,18 +242,22 @@ public enum Slots {
 }
 
 enum Keychain {
+    /// Reads through `/usr/bin/security`, the tool that saved the item and so is on its
+    /// access list: no password prompt. Reading with SecItemCopyMatching instead asks for
+    /// your password for every new build, because ad-hoc debug builds change signature.
+    /// Switch to the Security framework once builds are signed with a stable identity.
     static func read(service: String, account: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data, let key = String(data: data, encoding: .utf8) else { return nil }
-        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        p.arguments = ["find-generic-password", "-s", service, "-a", account, "-w"]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { return nil }
+        let key = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        return key.isEmpty ? nil : key
     }
 }
