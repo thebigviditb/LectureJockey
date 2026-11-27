@@ -5,16 +5,24 @@ setvbuf(stdout, nil, _IOLBF, 0)
 
 let usage = """
     usage:
-      lecturejockey watch [--dry-run] [--verbose] [--no-duck] [--no-jev]
+      lecturejockey watch [--dry-run] [--verbose] [--no-duck] [--no-jev] [--dip-level PERCENT]
                                         act on Wispr Flow dictations while a video plays;
-                                        lowers the video to 10% while Wispr records on speakers
+                                        lowers the video (default 10%) while Wispr records on speakers
       lecturejockey parse <text>        show what a phrase parses to
       lecturejockey classify <text>     ask Jev what a phrase means (needs the Keychain key)
       lecturejockey do <text>           apply a phrase to Chrome's front tab now
       lecturejockey state               show the front tab's video state
       lecturejockey audio               show the output device and whether a mic is in use
-      lecturejockey tap-test [seconds]  lower all of Chrome's audio to 10% for a few seconds
+      lecturejockey tap-test [PERCENT] [SECONDS]
+                                        lower all of Chrome's audio (default 10%, 4 s) to hear a level
     """
+
+/// "--dip-level 25" -> 0.25. Percent of the signal level, so 10 = 20 dB quieter.
+func dipLevel(_ args: [String]) -> Double {
+    guard let i = args.firstIndex(of: "--dip-level"), i + 1 < args.count else { return Ducker.Config().level }
+    guard let p = Double(args[i + 1]), (1...100).contains(p) else { fail("--dip-level takes a percent from 1 to 100") }
+    return p / 100
+}
 
 func log(_ s: String) {
     let f = DateFormatter()
@@ -65,12 +73,14 @@ case "audio":
     print("output: \(AudioDevices.outputName()) builtInSpeakers=\(AudioDevices.outputIsBuiltInSpeakers()) micInUse=\(m.anyRunning)")
 
 case "tap-test":
-    // Lowers all of Chrome's audio to 10% for a few seconds, as a dictation over an embedded player would.
-    let seconds = args.first.flatMap(Double.init) ?? 4
+    // Lowers all of Chrome's audio for a few seconds, as a dictation over an embedded player would.
+    let percent = args.first.flatMap(Double.init) ?? Ducker.Config().level * 100
+    let seconds = args.dropFirst().first.flatMap(Double.init) ?? 4
+    guard (1...100).contains(percent) else { fail("percent must be 1 to 100") }
     let tap = ChromeAudioTap()
     do {
-        try tap.start(gain: 0.1)
-        print("Chrome audio at 10% for \(seconds)s on \(AudioDevices.outputName())")
+        try tap.start(gain: percent / 100)
+        print("Chrome audio at \(Int(percent))% (\(String(format: "%.0f", 20 * log10(percent / 100))) dB) for \(seconds)s on \(AudioDevices.outputName())")
         Thread.sleep(forTimeInterval: seconds)
         tap.stop()
         print("restored")
@@ -94,9 +104,12 @@ case "watch":
         if args.contains("--verbose") { watcher.onWrite = { log("write event: \($0)") } }
 
         // Lower the video while Wispr records over the built-in speakers.
+        var dipConfig = Ducker.Config()
+        dipConfig.level = dipLevel(args)
         let ducker = Ducker(
             volume: ChromeVolume(driver: driver, nowPlaying: router.nowPlaying, log: { log($0) }),
             speakersActive: { AudioDevices.outputIsBuiltInSpeakers() },
+            config: dipConfig,
             log: { log($0) }
         )
         let micQueue = DispatchQueue(label: "lecturejockey.mic")
@@ -120,7 +133,7 @@ case "watch":
         // Jev handles phrasings no grammar rule covers. Without a key, grammar only.
         let jev = args.contains("--no-jev") ? nil : JevClassifier.fromKeychain()
 
-        log("watching \(watcher.history.path)\(dryRun ? " (dry run)" : "")\(noDuck || dryRun ? "" : ", volume dip on built-in speakers (output now: \(AudioDevices.outputName()))"), Jev \(jev == nil ? "off" : "on"), Now Playing fallback \(router.nowPlaying == nil ? "off (brew install media-control)" : "on")")
+        log("watching \(watcher.history.path)\(dryRun ? " (dry run)" : "")\(noDuck || dryRun ? "" : ", volume dip to \(Int(dipConfig.level * 100))% on built-in speakers (output now: \(AudioDevices.outputName()))"), Jev \(jev == nil ? "off" : "on"), Now Playing fallback \(router.nowPlaying == nil ? "off (brew install media-control)" : "on")")
         watcher.run { d in
             let heard = "\"\(d.text.prefix(80))\" app=\(d.app) url=\(d.url)"
             func execute(_ command: Command, on target: (driver: PlayerDriver, video: ChromeDriver.VideoState)?, via: String) throws {

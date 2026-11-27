@@ -40,7 +40,7 @@ On the built-in speakers the mic hears the video, and Wispr transcribes the lect
 - a 10-minute safety cap,
 - LectureJockey exits (Ctrl-C or kill).
 
-For a player embedded from another domain (SproutVideo, Vimeo), the page's JavaScript can't reach the video, so LectureJockey lowers all of Chrome's audio instead, with a Core Audio process tap (macOS 14.2+): the tap mutes Chrome's own output and plays it back at 10% on the current output. It is used only when Now Playing says Chrome is playing and the tab has no reachable video. Capturing another app's audio needs the System Audio Recording permission (asked of the app that launched LectureJockey). `lecturejockey tap-test` tries it for a few seconds.
+For a player embedded from another domain (SproutVideo, Vimeo), the page's JavaScript can't reach the video, so LectureJockey lowers all of Chrome's audio instead, with a Core Audio process tap (macOS 14.2+): the tap mutes Chrome's own output and plays it back at 10% on the current output. It is used only when Now Playing says Chrome is playing and the tab has no reachable video. Capturing another app's audio needs the System Audio Recording permission (asked of the app that launched LectureJockey). `lecturejockey tap-test 25` plays Chrome at 25% for a few seconds so you can pick a level by ear; `watch --dip-level 25` uses it. Levels are a percent of the signal, so 10% is 20 dB quieter, which sounds close to silent under speech.
 
 Headphones, AirPods and other outputs are left alone. If you change the volume yourself mid-recording, your setting wins. `--no-duck` turns it off.
 
