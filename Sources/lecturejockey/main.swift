@@ -13,6 +13,7 @@ let usage = """
       lecturejockey do <text>           apply a phrase to Chrome's front tab now
       lecturejockey state               show the front tab's video state
       lecturejockey audio               show the output device and whether a mic is in use
+      lecturejockey tap-test [seconds]  lower all of Chrome's audio to 10% for a few seconds
     """
 
 func log(_ s: String) {
@@ -63,6 +64,18 @@ case "audio":
     mics.sync { m.start() }
     print("output: \(AudioDevices.outputName()) builtInSpeakers=\(AudioDevices.outputIsBuiltInSpeakers()) micInUse=\(m.anyRunning)")
 
+case "tap-test":
+    // Lowers all of Chrome's audio to 10% for a few seconds, as a dictation over an embedded player would.
+    let seconds = args.first.flatMap(Double.init) ?? 4
+    let tap = ChromeAudioTap()
+    do {
+        try tap.start(gain: 0.1)
+        print("Chrome audio at 10% for \(seconds)s on \(AudioDevices.outputName())")
+        Thread.sleep(forTimeInterval: seconds)
+        tap.stop()
+        print("restored")
+    } catch { tap.stop(); fail("\(error)") }
+
 case "do":
     let text = args.joined(separator: " ")
     guard let c = CommandParser.parse(text) else { fail("not a command: \(text)") }
@@ -82,7 +95,7 @@ case "watch":
 
         // Lower the video while Wispr records over the built-in speakers.
         let ducker = Ducker(
-            volume: ChromeVolume(log: { log($0) }),
+            volume: ChromeVolume(driver: driver, nowPlaying: router.nowPlaying, log: { log($0) }),
             speakersActive: { AudioDevices.outputIsBuiltInSpeakers() },
             log: { log($0) }
         )

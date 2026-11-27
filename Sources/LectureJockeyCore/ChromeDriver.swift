@@ -89,10 +89,19 @@ public struct ChromeDriver: Sendable {
     /// Lowers the playing, unmuted video in the front tab to `level` if it is
     /// louder. The previous volume is kept on the element (data-lj-volume), so a
     /// restore works even after LectureJockey restarts.
-    public func duck(to level: Double) throws -> DuckToken? {
+    public enum DuckResult: Sendable, Equatable {
+        case ducked(DuckToken)
+        /// The video is paused, muted or already at or below the level.
+        case notNeeded
+        /// No video the page's JavaScript can reach, e.g. a player embedded from another domain.
+        case noReachableVideo
+    }
+
+    public func duck(to level: Double) throws -> DuckResult {
         let js = """
             (() => { \(Self.pick)
-              if (!v || v.paused || v.ended || v.muted || v.volume <= \(level)) return '';
+              if (!v) return 'none';
+              if (v.paused || v.ended || v.muted || v.volume <= \(level)) return '';
               const prev = v.volume;
               v.dataset.ljVolume = String(prev);
               v.volume = \(level);
@@ -105,15 +114,18 @@ public struct ChromeDriver: Sendable {
                 set w to front window
                 set t to active tab of w
                 set r to execute t javascript \(appleScriptString(js))
-                if r is "" or r is missing value then return ""
+                if r is missing value then return ""
+                if r is "" or r is "none" then return r
                 return ((id of w) as text) & "|" & ((id of t) as text) & "|" & r
             end tell
             """
-        let parts = try AppleScript.run(script).split(separator: "|").map(String.init)
+        let out = try AppleScript.run(script)
+        if out == "none" { return .noReachableVideo }
+        let parts = out.split(separator: "|").map(String.init)
         guard parts.count == 3, let w = Int(parts[0]), let t = Int(parts[1]), let prev = Double(parts[2]) else {
-            return nil
+            return .notNeeded
         }
-        return DuckToken(window: w, tab: t, previous: prev, level: level)
+        return .ducked(DuckToken(window: w, tab: t, previous: prev, level: level))
     }
 
     /// Puts the volume back on the tab that was ducked, unless the user changed it meanwhile.

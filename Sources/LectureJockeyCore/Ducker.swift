@@ -55,7 +55,9 @@ public final class Ducker: @unchecked Sendable {
             let gen = generation
             active = (token, id, gen)
             micSeen = micRunning
-            log("duck: video volume \(Int((token.previous * 100).rounded()))% -> \(Int(config.level * 100))%")
+            log(token.viaProcessTap
+                ? "duck: Chrome audio -> \(Int(config.level * 100))% (embedded player)"
+                : "duck: video volume \(Int((token.previous * 100).rounded()))% -> \(Int(config.level * 100))%")
             queue.asyncAfter(deadline: .now() + config.micStartGrace) { [self] in
                 if active?.generation == gen, !micSeen { restore("mic never started, recording cancelled") }
             }
@@ -93,21 +95,39 @@ public final class Ducker: @unchecked Sendable {
     }
 }
 
-/// Chrome's front tab as the `Ducker.Volume`.
-public struct ChromeVolume: Ducker.Volume {
+/// Chrome as the `Ducker.Volume`: the front tab's video when its JavaScript can
+/// reach it (just that video is lowered), else, when Chrome is playing an embedded
+/// player it cannot reach, all of Chrome's audio through a process tap.
+public final class ChromeVolume: Ducker.Volume, @unchecked Sendable {
     public let driver: ChromeDriver
+    public let nowPlaying: NowPlayingDriver?
     public let log: @Sendable (String) -> Void
+    private let tap = ChromeAudioTap()
 
-    public init(driver: ChromeDriver = ChromeDriver(), log: @escaping @Sendable (String) -> Void) {
+    public init(driver: ChromeDriver = ChromeDriver(), nowPlaying: NowPlayingDriver?, log: @escaping @Sendable (String) -> Void) {
         self.driver = driver
+        self.nowPlaying = nowPlaying
         self.log = log
     }
 
     public func duck(to level: Double) -> DuckToken? {
-        do { return try driver.duck(to: level) } catch { log("duck: error: \(error)"); return nil }
+        do {
+            switch try driver.duck(to: level) {
+            case .ducked(let token): return token
+            case .notNeeded: return nil
+            case .noReachableVideo:
+                guard let np = nowPlaying, let state = try np.state(), state.playing else { return nil }
+                try tap.start(gain: level)
+                return DuckToken(window: 0, tab: 0, previous: 1, level: level, viaProcessTap: true)
+            }
+        } catch {
+            log("duck: error: \(error)")
+            return nil
+        }
     }
 
     public func restore(_ token: DuckToken) {
+        if token.viaProcessTap { tap.stop(); return }
         do { try driver.restore(token) } catch { log("duck: restore error: \(error)") }
     }
 }
@@ -119,10 +139,13 @@ public struct DuckToken: Sendable, Equatable {
     /// The volume before the duck, and the level it was lowered to.
     public let previous: Double
     public let level: Double
-    public init(window: Int, tab: Int, previous: Double, level: Double) {
+    /// Lowered all of Chrome's audio (embedded player) rather than one video.
+    public let viaProcessTap: Bool
+    public init(window: Int, tab: Int, previous: Double, level: Double, viaProcessTap: Bool = false) {
         self.window = window
         self.tab = tab
         self.previous = previous
         self.level = level
+        self.viaProcessTap = viaProcessTap
     }
 }
