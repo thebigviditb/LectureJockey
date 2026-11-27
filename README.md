@@ -63,7 +63,18 @@ The browser drivers need "Allow JavaScript from Apple Events" turned on (Chrome:
 
 ## Status
 
-Planning. The first test covers only the Wispr listener and the Chrome driver, and checks where Wispr's pasted text lands when the focused element is a video page.
+First test: a CLI with the Wispr listener, the command parser, the gate and the Chrome driver. No menu-bar app, Now Playing or other players yet.
+
+```sh
+swift build
+.build/debug/lecturejockey watch            # act on dictations while a Chrome video plays
+.build/debug/lecturejockey watch --dry-run  # log what it would do
+.build/debug/lecturejockey parse "go back thirty seconds"
+.build/debug/lecturejockey do "2x"          # apply to Chrome's front tab now
+swift test
+```
+
+In v1 the gate checks for a playing video by asking Chrome's front tab directly. The log prints the focused element after each command, which shows where Wispr's paste landed.
 
 ## Later
 
