@@ -15,7 +15,9 @@ Menu-bar agent (macOS)
 
 ### 1. Dictation listener
 
-Wispr Flow saves every dictation as a row in the `History` table of its local SQLite database. The listener watches the database's WAL file, opens it read-only and reads rows newer than the last one it saw.
+Wispr Flow saves every dictation as a row in the `History` table of its local SQLite database. The listener opens it read-only and reads rows newer than the last one it saw, each time Wispr writes.
+
+SQLite can't notify other processes, so the listener uses kqueue vnode watches: one on the WAL and the database file, which fire on every write, and one on the folder, which reattaches them when SQLite deletes or recreates the WAL. FSEvents doesn't work here: it reports a write to a file only once the writer closes it, and Wispr keeps the database open.
 
 Fields used:
 

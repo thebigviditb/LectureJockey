@@ -5,7 +5,8 @@ setvbuf(stdout, nil, _IOLBF, 0)
 
 let usage = """
     usage:
-      lecturejockey watch [--dry-run]   act on Wispr Flow dictations while a video plays
+      lecturejockey watch [--dry-run] [--verbose]
+                                        act on Wispr Flow dictations while a video plays
       lecturejockey parse <text>        show what a phrase parses to
       lecturejockey do <text>           apply a phrase to Chrome's front tab now
       lecturejockey state               show the front tab's video state
@@ -13,7 +14,7 @@ let usage = """
 
 func log(_ s: String) {
     let f = DateFormatter()
-    f.dateFormat = "HH:mm:ss"
+    f.dateFormat = "HH:mm:ss.SSS"
     print("\(f.string(from: Date()))  \(s)")
 }
 
@@ -49,7 +50,9 @@ case "do":
 case "watch":
     let dryRun = args.contains("--dry-run")
     do {
-        let watcher = try Watcher(history: try WisprHistory())
+        let dbPath = ProcessInfo.processInfo.environment["LJ_WISPR_DB"] ?? WisprHistory.defaultPath
+        let watcher = try Watcher(history: try WisprHistory(path: dbPath))
+        if args.contains("--verbose") { watcher.onWrite = { log("write event: \($0)") } }
         log("watching \(watcher.history.path)\(dryRun ? " (dry run)" : "")")
         watcher.run { d in
             let heard = "\"\(d.text.prefix(80))\" app=\(d.app) url=\(d.url)"
