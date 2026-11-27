@@ -107,7 +107,7 @@ case "watch":
         // Jev handles phrasings no grammar rule covers. Without a key, grammar only.
         let jev = args.contains("--no-jev") ? nil : JevClassifier.fromKeychain()
 
-        log("watching \(watcher.history.path)\(dryRun ? " (dry run)" : "")\(noDuck || dryRun ? "" : ", ducking on \(AudioDevices.outputName())"), Jev \(jev == nil ? "off" : "on"), Now Playing fallback \(router.nowPlaying == nil ? "off (brew install media-control)" : "on")")
+        log("watching \(watcher.history.path)\(dryRun ? " (dry run)" : "")\(noDuck || dryRun ? "" : ", volume dip on built-in speakers (output now: \(AudioDevices.outputName()))"), Jev \(jev == nil ? "off" : "on"), Now Playing fallback \(router.nowPlaying == nil ? "off (brew install media-control)" : "on")")
         watcher.run { d in
             let heard = "\"\(d.text.prefix(80))\" app=\(d.app) url=\(d.url)"
             func execute(_ command: Command, on target: (driver: PlayerDriver, video: ChromeDriver.VideoState)?, via: String) throws {
