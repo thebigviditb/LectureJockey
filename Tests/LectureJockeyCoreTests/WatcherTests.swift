@@ -17,7 +17,7 @@ final class FakeWispr {
         try exec("PRAGMA journal_mode=WAL")
         try exec("""
             CREATE TABLE History(transcriptEntityId TEXT PRIMARY KEY, asrText TEXT, formattedText TEXT,
-              timestamp DATETIME, status TEXT, app TEXT, url TEXT)
+              timestamp DATETIME, status TEXT, app TEXT, url TEXT, duration FLOAT)
             """)
         try insert("old", "from before the watcher started")
     }
@@ -46,7 +46,7 @@ final class FakeWispr {
         f.timeZone = TimeZone(identifier: "UTC")
         f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
         let ts = f.string(from: Date()) + " +00:00"
-        try exec("INSERT INTO History VALUES('\(id)', '', '\(text)', '\(ts)', 'formatted', 'com.google.Chrome', 'youtube.com')")
+        try exec("INSERT INTO History VALUES('\(id)', '', '\(text)', '\(ts)', 'formatted', 'com.google.Chrome', 'youtube.com', 1.5)")
     }
 }
 

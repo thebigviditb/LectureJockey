@@ -4,7 +4,7 @@ import Foundation
 /// when all of these hold:
 ///   1. the whole utterance parses as a command,
 ///   2. Wispr typed it into a supported player app,
-///   3. it is fresh (not an old row seen late),
+///   3. it is fresh: finished speaking at most `maxAge` ago (not an old row seen late),
 ///   4. that app has a video, playing (or paused, for "play").
 public enum Gate {
     public static let maxAge: TimeInterval = 15
@@ -21,7 +21,7 @@ public enum Gate {
         guard supportedApps.contains(d.app) else {
             return .skip("target app \(d.app.isEmpty ? "unknown" : d.app) is not a supported player")
         }
-        guard let date = d.date, now.timeIntervalSince(date) <= maxAge else { return .skip("stale dictation") }
+        guard let end = d.endDate, now.timeIntervalSince(end) <= maxAge else { return .skip("stale dictation") }
         return .run(command)
     }
 

@@ -61,8 +61,8 @@ struct CommandParserTests {
 struct GateTests {
     let now = WisprHistory.parseTimestamp("2026-11-27 18:40:21.915 +00:00")!
 
-    func dictation(_ text: String, app: String = ChromeDriver.bundleID, at ts: String = "2026-11-27 18:40:20.000 +00:00") -> Dictation {
-        Dictation(id: "x", timestamp: ts, app: app, url: "youtube.com", text: text, status: "formatted")
+    func dictation(_ text: String, app: String = ChromeDriver.bundleID, at ts: String = "2026-11-27 18:40:20.000 +00:00", duration: Double = 1.5) -> Dictation {
+        Dictation(id: "x", timestamp: ts, app: app, url: "youtube.com", text: text, status: "formatted", duration: duration)
     }
 
     let playing = ChromeDriver.VideoState(playing: true, rate: 1, time: 100, duration: 600, activeElement: "body")
@@ -80,6 +80,11 @@ struct GateTests {
 
     @Test func skipsStaleRows() {
         #expect(Gate.precheck(dictation("2x", at: "2026-11-27 18:30:00.000 +00:00"), now: now) == .skip("stale dictation"))
+    }
+
+    @Test func ageCountsFromWhenYouStoppedSpeaking() {
+        // Started 20 s ago but spoke for 10 s: finished 10 s ago, still fresh.
+        #expect(Gate.precheck(dictation("2x", at: "2026-11-27 18:40:01.915 +00:00", duration: 10), now: now) == .run(.setRate(2)))
     }
 
     @Test func needsPlayingVideo() {

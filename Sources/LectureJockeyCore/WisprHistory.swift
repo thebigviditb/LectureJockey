@@ -4,7 +4,8 @@ import SQLite3
 /// One dictation as Wispr Flow recorded it.
 public struct Dictation: Sendable, Equatable {
     public let id: String
-    /// As stored, e.g. "2026-11-27 18:40:21.915 +00:00" (UTC).
+    /// When the recording started, as stored, e.g. "2026-11-27 18:40:21.915 +00:00" (UTC).
+    /// Wispr inserts the row (with no text) as you start speaking and fills it in when done.
     public let timestamp: String
     /// Bundle ID of the app Wispr typed into, e.g. "com.google.Chrome".
     public let app: String
@@ -12,8 +13,12 @@ public struct Dictation: Sendable, Equatable {
     public let url: String
     public let text: String
     public let status: String
+    /// Length of the recording in seconds.
+    public var duration: Double = 0
 
     public var date: Date? { WisprHistory.parseTimestamp(timestamp) }
+    /// When you stopped speaking.
+    public var endDate: Date? { date?.addingTimeInterval(duration) }
 }
 
 /// Read-only access to Wispr Flow's local history database.
@@ -54,13 +59,15 @@ public final class WisprHistory {
     public func dictations(since timestamp: String) throws -> [Dictation] {
         let sql = """
             SELECT transcriptEntityId, timestamp, COALESCE(app, ''), COALESCE(url, ''),
-                   COALESCE(NULLIF(formattedText, ''), NULLIF(asrText, ''), ''), COALESCE(status, '')
+                   COALESCE(NULLIF(formattedText, ''), NULLIF(asrText, ''), ''), COALESCE(status, ''),
+                   COALESCE(duration, 0)
             FROM History WHERE timestamp >= ? ORDER BY timestamp ASC
             """
         return try query(sql, bind: [timestamp]) { stmt in
             Dictation(
                 id: column(stmt, 0), timestamp: column(stmt, 1), app: column(stmt, 2),
-                url: column(stmt, 3), text: column(stmt, 4), status: column(stmt, 5)
+                url: column(stmt, 3), text: column(stmt, 4), status: column(stmt, 5),
+                duration: sqlite3_column_double(stmt, 6)
             )
         }
     }
