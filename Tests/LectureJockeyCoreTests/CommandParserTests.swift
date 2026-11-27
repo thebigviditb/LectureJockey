@@ -45,6 +45,16 @@ struct CommandParserTests {
         ("Jump to 2:30", .seekTo(150)),
         ("Go to 1:02:30", .seekTo(3750)),
         ("Go to ninety seconds", .seekTo(90)),
+        ("Go to the middle of the video.", .seekToFraction(0.5)),
+        ("Jump to the middle", .seekToFraction(0.5)),
+        ("Skip to the halfway point", .seekToFraction(0.5)),
+        ("Go halfway through the video", .seekToFraction(0.5)),
+        ("Go to the end of the video", .seekToFraction(1)),
+        ("Jump to 75 percent", .seekToFraction(0.75)),
+        ("Go to 80% of the way through", .seekToFraction(0.8)),
+        ("Skip to a quarter of the way through", .seekToFraction(0.25)),
+        ("Jump to three quarters of the way in", .seekToFraction(0.75)),
+        ("Go to a third of the way through the lecture", .seekToFraction(1.0 / 3)),
     ])
     func parses(_ text: String, _ expected: Command) {
         #expect(CommandParser.parse(text) == expected)
@@ -65,6 +75,9 @@ struct CommandParserTests {
         "Thanks, that looks good.",
         "Go to the beginning of the document and fix the title",
         "Jump to 2:75",
+        "Go to the middle of the street",
+        "Jump to 150 percent",
+        "We need to get to the end of this project",
     ])
     func rejects(_ text: String) {
         #expect(CommandParser.parse(text) == nil)

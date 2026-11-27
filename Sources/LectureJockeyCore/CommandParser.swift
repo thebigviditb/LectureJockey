@@ -9,7 +9,7 @@ public enum CommandParser {
 
     public static func parse(_ text: String) -> Command? {
         let words = normalize(text)
-        guard !words.isEmpty, words.count <= 8 else { return nil }
+        guard !words.isEmpty, words.count <= 12 else { return nil }
         let s = words.joined(separator: " ")
 
         if let c = parsePlayPause(s) { return c }
@@ -79,6 +79,22 @@ public enum CommandParser {
         if s.wholeMatch("(?:(?:go|jump|skip|rewind) )?(?:back |all the way back )?to (?:the )?\(start)\(media)") { return .seekTo(0) }
         if s.wholeMatch("(?:restart|start over|start from the \(start))\(media)") { return .seekTo(0) }
 
+        // Positions relative to the length: "the middle", "halfway", "the end",
+        // "75 percent of the way", "a third of the way through", "three quarters".
+        let to = "(?:(?:go|jump|skip|seek)(?: back| ahead| forward)? to |(?:go|jump|skip) )"
+        let through = "(?: (?:of )?the way)?(?: (?:through|in|into))?\(media)"
+        if s.wholeMatch("\(to)(?:the )?(?:middle|half ?way(?: point)?)\(through)") { return .seekToFraction(0.5) }
+        if s.wholeMatch("\(to)(?:the )?end\(media)") { return .seekToFraction(1) }
+        if let m = s.wholeCaptures("\(to)(\\d+(?:\\.\\d+)?) ?(?:percent|%)\(through)"), let p = Double(m[0]), p <= 100 {
+            return .seekToFraction(p / 100)
+        }
+        let fractions: [(String, Double)] = [
+            ("(?:a|1) quarter", 0.25), ("(?:a|1) third", 1.0 / 3), ("2 thirds", 2.0 / 3), ("3 quarters", 0.75),
+        ]
+        for (words, f) in fractions where s.wholeMatch("\(to)\(words)\(through)") {
+            return .seekToFraction(f)
+        }
+
         let go = "(?:go|jump|skip|seek)(?: back| ahead| forward)? to"
         let mins = "(?:minutes?|mins?|m)"
         let secs = "(?:seconds?|secs?|s)"
@@ -117,6 +133,7 @@ public enum CommandParser {
     static func normalize(_ text: String) -> [String] {
         var t = text.lowercased()
         t = t.replacingOccurrences(of: "×", with: "x")
+        t = t.replacingOccurrences(of: "%", with: " percent")
         t = t.replacingOccurrences(of: "(?<!\\d)\\.|\\.(?!\\d)", with: " ", options: .regularExpression)
         t = t.replacingOccurrences(of: "[^a-z0-9. ]", with: " ", options: .regularExpression)
         var words = t.split(separator: " ").map(String.init)

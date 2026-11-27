@@ -10,6 +10,8 @@ public enum Command: Equatable, Sendable {
     case seek(by: Double)
     /// Seek to an absolute position, in seconds from the start.
     case seekTo(Double)
+    /// Seek to a fraction of the video's length, 0...1 (0.5 = the middle).
+    case seekToFraction(Double)
     case pause
     case play
 
@@ -19,6 +21,7 @@ public enum Command: Equatable, Sendable {
         case .changeRate(let d): return "rate \(d > 0 ? "+" : "")\(Self.format(d))"
         case .seek(let s): return "seek \(s > 0 ? "+" : "")\(Self.format(s))s"
         case .seekTo(let s): return "seek to \(Self.format(s))s"
+        case .seekToFraction(let f): return "seek to \(Self.format((f * 1000).rounded() / 10))%"
         case .pause: return "pause"
         case .play: return "play"
         }

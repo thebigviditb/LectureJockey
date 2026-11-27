@@ -51,6 +51,8 @@ public struct ChromeDriver: Sendable {
             js = "v.currentTime = Math.max(0, Math.min(isFinite(v.duration) ? v.duration : Infinity, v.currentTime + \(s)));"
         case .seekTo(let s):
             js = "v.currentTime = Math.max(0, Math.min(isFinite(v.duration) ? v.duration : Infinity, \(s)));"
+        case .seekToFraction(let f):
+            js = "if (isFinite(v.duration)) v.currentTime = Math.max(0, Math.min(v.duration - 0.5, v.duration * \(f)));"
         case .pause:
             js = "v.pause();"
         case .play:

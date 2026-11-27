@@ -58,7 +58,7 @@ Fixed phrases only, no LLM:
 
 - Speed: "2x", "speed up", "slow down", "normal speed"
 - Seek: "go back 30 seconds", "skip ahead a minute"
-- Jump: "go to the beginning", "restart", "go to 5 minutes", "jump to 2:30"
+- Jump: "go to the beginning", "restart", "go to 5 minutes", "jump to 2:30", "go to the middle", "skip to 75 percent", "jump to three quarters of the way in", "go to the end"
 - Playback: "pause", "play"
 
 ### 4. Player drivers
