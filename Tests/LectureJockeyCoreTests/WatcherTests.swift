@@ -40,13 +40,14 @@ final class FakeWispr {
         }
     }
 
-    func insert(_ id: String, _ text: String) throws {
+    func insert(_ id: String, _ text: String, status: String? = "formatted") throws {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = TimeZone(identifier: "UTC")
         f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
         let ts = f.string(from: Date()) + " +00:00"
-        try exec("INSERT INTO History VALUES('\(id)', '', '\(text)', '\(ts)', 'formatted', 'com.google.Chrome', 'youtube.com', 1.5)")
+        let st = status.map { "'\($0)'" } ?? "NULL"
+        try exec("INSERT INTO History VALUES('\(id)', '', '\(text)', '\(ts)', \(st), 'com.google.Chrome', 'youtube.com', 1.5)")
     }
 }
 
@@ -56,6 +57,7 @@ final class Inbox: @unchecked Sendable {
     private var ids: [String] = []
 
     func add(_ d: Dictation) { lock.withLock { ids.append(d.id) } }
+    func add(_ id: String) { lock.withLock { ids.append(id) } }
 
     /// Waits up to `timeout` for `id`; returns how long it took.
     func wait(for id: String, timeout: TimeInterval = 1) -> TimeInterval? {
@@ -120,5 +122,32 @@ struct WatcherTests {
         try fake.open() // WAL recreated on the next write
         try fake.insert("afterRecreate", "pause")
         #expect(inbox.wait(for: "afterRecreate") != nil)
+    }
+
+    @Test func reportsRecordingStartAndEnd() throws {
+        let fake = try FakeWispr()
+        let watcher = try Watcher(history: try WisprHistory(path: fake.path))
+        let starts = Inbox(), ends = Inbox(), dictations = Inbox()
+        watcher.onRecordingStart = { starts.add("start:" + $0) }
+        watcher.onRecordingEnd = { ends.add("end:" + $0) }
+        watcher.start(onDictation: dictations.add)
+        defer { watcher.stop() }
+        Thread.sleep(forTimeInterval: 0.1)
+
+        // Key pressed: Wispr inserts a row with no text and no status.
+        try fake.insert("rec", "", status: nil)
+        #expect(starts.wait(for: "start:rec") != nil)
+        #expect(ends.all.isEmpty)
+        // Done: text and status arrive.
+        try fake.exec("UPDATE History SET formattedText = '2x', status = 'formatted' WHERE transcriptEntityId = 'rec'")
+        #expect(ends.wait(for: "end:rec") != nil)
+        #expect(dictations.wait(for: "rec") != nil)
+
+        // A recording dismissed with no text still ends.
+        try fake.insert("dismissed", "", status: nil)
+        #expect(starts.wait(for: "start:dismissed") != nil)
+        try fake.exec("UPDATE History SET status = 'dismissed' WHERE transcriptEntityId = 'dismissed'")
+        #expect(ends.wait(for: "end:dismissed") != nil)
+        #expect(starts.all == ["start:rec", "start:dismissed"], "each recording starts once")
     }
 }

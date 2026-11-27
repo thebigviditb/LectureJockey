@@ -16,6 +16,12 @@ public final class Watcher: @unchecked Sendable {
     public let history: WisprHistory
     /// Called on every write event, with the file name, before querying.
     public var onWrite: (@Sendable (String) -> Void)?
+    /// Wispr added a row with no text or status: you pressed the key and it is recording.
+    public var onRecordingStart: (@Sendable (String) -> Void)?
+    /// That row got its text or a final status (formatted, dismissed, no_audio, ...).
+    public var onRecordingEnd: (@Sendable (String) -> Void)?
+    /// A row counts as a new recording only if it started this recently.
+    public var recordingStartWindow: TimeInterval = 30
 
     private let queue = DispatchQueue(label: "lecturejockey.watcher")
     private let folder: String
@@ -25,6 +31,7 @@ public final class Watcher: @unchecked Sendable {
     private var onDictation: ((Dictation) -> Void)?
     private var cursor: String
     private var seen: Set<String> = []
+    private var recording: Set<String> = []
 
     public init(history: WisprHistory) throws {
         self.history = history
@@ -105,9 +112,24 @@ public final class Watcher: @unchecked Sendable {
     private func check() {
         do {
             for d in try history.dictations(since: cursor) where !seen.contains(d.id) {
-                // Wispr can insert a row before the text is ready; pick it up on a later write.
-                guard !d.text.isEmpty else { continue }
+                if d.text.isEmpty {
+                    if d.status.isEmpty {
+                        // Recording in progress. Wispr leaves cancelled recordings like this forever,
+                        // so only a fresh row counts as a start.
+                        if !recording.contains(d.id), let date = d.date,
+                           Date().timeIntervalSince(date) <= recordingStartWindow {
+                            recording.insert(d.id)
+                            onRecordingStart?(d.id)
+                        }
+                    } else if recording.remove(d.id) != nil {
+                        // Finalized with no text (dismissed, no audio, error). Not marked seen,
+                        // so text that arrives later is still delivered.
+                        onRecordingEnd?(d.id)
+                    }
+                    continue
+                }
                 seen.insert(d.id)
+                if recording.remove(d.id) != nil { onRecordingEnd?(d.id) }
                 if d.timestamp > cursor { cursor = d.timestamp }
                 onDictation?(d)
             }

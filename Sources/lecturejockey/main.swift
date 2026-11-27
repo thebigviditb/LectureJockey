@@ -5,11 +5,13 @@ setvbuf(stdout, nil, _IOLBF, 0)
 
 let usage = """
     usage:
-      lecturejockey watch [--dry-run] [--verbose]
-                                        act on Wispr Flow dictations while a video plays
+      lecturejockey watch [--dry-run] [--verbose] [--no-duck]
+                                        act on Wispr Flow dictations while a video plays;
+                                        lowers the video to 10% while Wispr records on speakers
       lecturejockey parse <text>        show what a phrase parses to
       lecturejockey do <text>           apply a phrase to Chrome's front tab now
       lecturejockey state               show the front tab's video state
+      lecturejockey audio               show the output device and whether a mic is in use
     """
 
 func log(_ s: String) {
@@ -42,6 +44,12 @@ case "parse":
 case "state":
     do { print(describe(try driver.state())) } catch { fail("\(error)") }
 
+case "audio":
+    let mics = DispatchQueue(label: "probe")
+    let m = MicMonitor(queue: mics) { _ in }
+    mics.sync { m.start() }
+    print("output: \(AudioDevices.outputName()) builtInSpeakers=\(AudioDevices.outputIsBuiltInSpeakers()) micInUse=\(m.anyRunning)")
+
 case "do":
     let text = args.joined(separator: " ")
     guard let c = CommandParser.parse(text) else { fail("not a command: \(text)") }
@@ -49,11 +57,37 @@ case "do":
 
 case "watch":
     let dryRun = args.contains("--dry-run")
+    let noDuck = args.contains("--no-duck")
     do {
         let dbPath = ProcessInfo.processInfo.environment["LJ_WISPR_DB"] ?? WisprHistory.defaultPath
         let watcher = try Watcher(history: try WisprHistory(path: dbPath))
         if args.contains("--verbose") { watcher.onWrite = { log("write event: \($0)") } }
-        log("watching \(watcher.history.path)\(dryRun ? " (dry run)" : "")")
+
+        // Lower the video while Wispr records over the built-in speakers.
+        let ducker = Ducker(
+            volume: ChromeVolume(log: { log($0) }),
+            speakersActive: { AudioDevices.outputIsBuiltInSpeakers() },
+            log: { log($0) }
+        )
+        let micQueue = DispatchQueue(label: "lecturejockey.mic")
+        let mic = MicMonitor(queue: micQueue) { running in ducker.micChanged(running: running) }
+        if !noDuck && !dryRun {
+            micQueue.sync { mic.start() }
+            watcher.onRecordingStart = { ducker.recordingStarted($0) }
+            watcher.onRecordingEnd = { ducker.recordingFinished($0) }
+        }
+        // Never leave a video at 10% on exit.
+        signal(SIGINT, SIG_IGN)
+        signal(SIGTERM, SIG_IGN)
+        let signals = [SIGINT, SIGTERM].map { sig in
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            source.setEventHandler { ducker.restoreNow(); exit(0) }
+            source.resume()
+            return source
+        }
+        _ = signals
+
+        log("watching \(watcher.history.path)\(dryRun ? " (dry run)" : "")\(noDuck || dryRun ? "" : ", ducking on \(AudioDevices.outputName())")")
         watcher.run { d in
             let heard = "\"\(d.text.prefix(80))\" app=\(d.app) url=\(d.url)"
             switch Gate.precheck(d) {

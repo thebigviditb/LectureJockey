@@ -30,6 +30,18 @@ Fields used:
 
 The schema is undocumented and may change with a Wispr update, so every read of it lives in one module.
 
+### Lowering the video while you dictate
+
+On the built-in speakers the mic hears the video, and Wispr transcribes the lecturer instead of you. So when Wispr starts a recording (it inserts an empty row the moment you press the key), LectureJockey lowers the playing video in Chrome's front tab to 10% if it is louder, and restores it when the first of these happens:
+
+- no app is using a microphone any more (Wispr stopped recording),
+- Wispr finalizes the row,
+- the mic never started within 2 s (a cancelled recording; Wispr leaves those rows unfinalized forever),
+- a 10-minute safety cap,
+- LectureJockey exits (Ctrl-C or kill).
+
+Headphones, AirPods and other outputs are left alone. If you change the volume yourself mid-recording, your setting wins. `--no-duck` turns it off.
+
 ### 2. Gate
 
 A dictation is treated as a command only when all three are true:
@@ -74,6 +86,7 @@ swift build
 .build/debug/lecturejockey watch --dry-run  # log what it would do
 .build/debug/lecturejockey parse "go back thirty seconds"
 .build/debug/lecturejockey do "2x"          # apply to Chrome's front tab now
+.build/debug/lecturejockey audio            # output device, built-in speakers?, mic in use?
 swift test
 ```
 
