@@ -5,7 +5,8 @@ import Foundation
 ///   1. the whole utterance parses as a command,
 ///   2. Wispr typed it into a supported player app,
 ///   3. it is fresh: finished speaking at most `maxAge` ago (not an old row seen late),
-///   4. that app has a video, playing (or paused, for "play").
+///   4. that app's front tab has a video (playing or paused: rewinding a paused
+///      lecture is normal).
 public enum Gate {
     public static let maxAge: TimeInterval = 15
     public static let supportedApps: Set<String> = [ChromeDriver.bundleID]
@@ -28,7 +29,8 @@ public enum Gate {
     /// Check 4, given what the player reports.
     public static func check(_ command: Command, video: ChromeDriver.VideoState?) -> Decision {
         guard let video else { return .skip("no video in the front tab") }
-        if command == .play { return video.playing ? .skip("already playing") : .run(command) }
-        return video.playing ? .run(command) : .skip("video is not playing")
+        if command == .play, video.playing { return .skip("already playing") }
+        if command == .pause, !video.playing { return .skip("already paused") }
+        return .run(command)
     }
 }

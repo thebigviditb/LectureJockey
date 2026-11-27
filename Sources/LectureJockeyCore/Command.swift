@@ -8,6 +8,8 @@ public enum Command: Equatable, Sendable {
     case changeRate(by: Double)
     /// Seek relative to the current position, in seconds (negative = back).
     case seek(by: Double)
+    /// Seek to an absolute position, in seconds from the start.
+    case seekTo(Double)
     case pause
     case play
 
@@ -16,6 +18,7 @@ public enum Command: Equatable, Sendable {
         case .setRate(let r): return "rate \(Self.format(r))x"
         case .changeRate(let d): return "rate \(d > 0 ? "+" : "")\(Self.format(d))"
         case .seek(let s): return "seek \(s > 0 ? "+" : "")\(Self.format(s))s"
+        case .seekTo(let s): return "seek to \(Self.format(s))s"
         case .pause: return "pause"
         case .play: return "play"
         }

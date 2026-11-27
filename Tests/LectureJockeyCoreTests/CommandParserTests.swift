@@ -34,6 +34,17 @@ struct CommandParserTests {
         ("Play", .play),
         ("Resume.", .play),
         ("Can you go back 30 seconds, please?", .seek(by: -30)),
+        ("Go to the beginning of the video.", .seekTo(0)),
+        ("Go back to the start", .seekTo(0)),
+        ("Restart the video", .seekTo(0)),
+        ("Start over.", .seekTo(0)),
+        ("Go to 5 minutes", .seekTo(300)),
+        ("Jump to minute 12", .seekTo(720)),
+        ("Skip to 1 minute 30 seconds", .seekTo(90)),
+        ("Go to 2 minutes and 15 seconds.", .seekTo(135)),
+        ("Jump to 2:30", .seekTo(150)),
+        ("Go to 1:02:30", .seekTo(3750)),
+        ("Go to ninety seconds", .seekTo(90)),
     ])
     func parses(_ text: String, _ expected: Command) {
         #expect(CommandParser.parse(text) == expected)
@@ -52,6 +63,8 @@ struct CommandParserTests {
         "Rewind 30",
         "",
         "Thanks, that looks good.",
+        "Go to the beginning of the document and fix the title",
+        "Jump to 2:75",
     ])
     func rejects(_ text: String) {
         #expect(CommandParser.parse(text) == nil)
@@ -87,10 +100,16 @@ struct GateTests {
         #expect(Gate.precheck(dictation("2x", at: "2026-11-27 18:40:01.915 +00:00", duration: 10), now: now) == .run(.setRate(2)))
     }
 
-    @Test func needsPlayingVideo() {
+    @Test func needsAVideo() {
         #expect(Gate.check(.setRate(2), video: playing) == .run(.setRate(2)))
-        #expect(Gate.check(.setRate(2), video: paused) == .skip("video is not playing"))
         #expect(Gate.check(.setRate(2), video: nil) == .skip("no video in the front tab"))
+    }
+
+    @Test func pausedVideoTakesSeeksAndRate() {
+        #expect(Gate.check(.seekTo(0), video: paused) == .run(.seekTo(0)))
+        #expect(Gate.check(.seek(by: -30), video: paused) == .run(.seek(by: -30)))
+        #expect(Gate.check(.setRate(2), video: paused) == .run(.setRate(2)))
+        #expect(Gate.check(.pause, video: paused) == .skip("already paused"))
     }
 
     @Test func playWorksOnPausedVideo() {

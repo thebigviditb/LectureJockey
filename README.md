@@ -34,7 +34,7 @@ The schema is undocumented and may change with a Wispr update, so every read of 
 
 A dictation is treated as a command only when all three are true:
 
-1. A video is playing (macOS Now Playing via `mediaremote-adapter`, with power assertions as a backup signal).
+1. The player has a video open, playing or paused (v1 asks Chrome's front tab; later macOS Now Playing via `mediaremote-adapter`).
 2. The whole utterance matches the command grammar, not just a phrase inside a longer sentence.
 3. Wispr's target app is the player app.
 
@@ -46,6 +46,7 @@ Fixed phrases only, no LLM:
 
 - Speed: "2x", "speed up", "slow down", "normal speed"
 - Seek: "go back 30 seconds", "skip ahead a minute"
+- Jump: "go to the beginning", "restart", "go to 5 minutes", "jump to 2:30"
 - Playback: "pause", "play"
 
 ### 4. Player drivers

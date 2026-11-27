@@ -49,6 +49,8 @@ public struct ChromeDriver: Sendable {
             js = "v.playbackRate = Math.min(4, Math.max(0.25, Math.round((v.playbackRate + \(d)) * 100) / 100));"
         case .seek(let s):
             js = "v.currentTime = Math.max(0, Math.min(isFinite(v.duration) ? v.duration : Infinity, v.currentTime + \(s)));"
+        case .seekTo(let s):
+            js = "v.currentTime = Math.max(0, Math.min(isFinite(v.duration) ? v.duration : Infinity, \(s)));"
         case .pause:
             js = "v.pause();"
         case .play:

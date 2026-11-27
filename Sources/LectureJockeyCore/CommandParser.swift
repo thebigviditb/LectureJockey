@@ -15,6 +15,7 @@ public enum CommandParser {
         if let c = parsePlayPause(s) { return c }
         if let c = parseRate(s) { return c }
         if let c = parseSeek(s) { return c }
+        if let c = parseSeekTo(s) { return c }
         return nil
     }
 
@@ -68,6 +69,38 @@ public enum CommandParser {
             return .seek(by: secs)
         }
         return nil
+    }
+
+    // MARK: - Seek to a position
+
+    private static func parseSeekTo(_ s: String) -> Command? {
+        let media = "(?: (?:of )?(?:the |this )?(?:video|lecture))?"
+        let start = "(?:beginning|start)"
+        if s.wholeMatch("(?:(?:go|jump|skip|rewind) )?(?:back |all the way back )?to (?:the )?\(start)\(media)") { return .seekTo(0) }
+        if s.wholeMatch("(?:restart|start over|start from the \(start))\(media)") { return .seekTo(0) }
+
+        let go = "(?:go|jump|skip|seek)(?: back| ahead| forward)? to"
+        let mins = "(?:minutes?|mins?|m)"
+        let secs = "(?:seconds?|secs?|s)"
+        // "go to 5 minutes", "jump to 1 minute 30 seconds", "skip to 2 minutes and 15 seconds"
+        if let m = s.wholeCaptures("\(go) (\\d+) \(mins)(?: (?:and )?(\\d+) \(secs))?"),
+           let mm = Double(m[0]) {
+            return position(mm * 60 + (m.count > 1 ? Double(m[1]) ?? 0 : 0))
+        }
+        // "go to minute 12"
+        if let m = s.wholeCaptures("\(go) minute (\\d+)"), let mm = Double(m[0]) { return position(mm * 60) }
+        // "go to 90 seconds"
+        if let m = s.wholeCaptures("\(go) (\\d+) \(secs)"), let ss = Double(m[0]) { return position(ss) }
+        // "jump to 2:30" (normalized to "2 30"), "go to 1:02:30"
+        if let m = s.wholeCaptures("\(go) (\\d+) (\\d{2})(?: (\\d{2}))?"), let a = Double(m[0]), let b = Double(m[1]) {
+            if m.count > 2, let c = Double(m[2]) { return position(a * 3600 + b * 60 + c) }
+            return b < 60 ? position(a * 60 + b) : nil
+        }
+        return nil
+    }
+
+    private static func position(_ secs: Double) -> Command? {
+        secs <= 24 * 3600 ? .seekTo(secs) : nil
     }
 
     private static func seconds(_ n: String, _ unit: String) -> Double? {
