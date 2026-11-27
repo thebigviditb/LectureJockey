@@ -5,10 +5,11 @@ setvbuf(stdout, nil, _IOLBF, 0)
 
 let usage = """
     usage:
-      lecturejockey watch [--dry-run] [--verbose] [--no-duck]
+      lecturejockey watch [--dry-run] [--verbose] [--no-duck] [--no-jev]
                                         act on Wispr Flow dictations while a video plays;
                                         lowers the video to 10% while Wispr records on speakers
       lecturejockey parse <text>        show what a phrase parses to
+      lecturejockey classify <text>     ask Jev what a phrase means (needs the Keychain key)
       lecturejockey do <text>           apply a phrase to Chrome's front tab now
       lecturejockey state               show the front tab's video state
       lecturejockey audio               show the output device and whether a mic is in use
@@ -43,6 +44,15 @@ case "parse":
 
 case "state":
     do { print(describe(try driver.state())) } catch { fail("\(error)") }
+
+case "classify":
+    let text = args.joined(separator: " ")
+    guard let jev = JevClassifier.fromKeychain() else { fail("no Jev key in the Keychain (service LectureJockey, account typesafe)") }
+    do {
+        let a = try jev.classify(text)
+        let c = jev.command(for: a, text: text)
+        print("\(a.intent.rawValue) \(String(format: "%.2f", a.confidence)) position=\(a.position.rawValue) -> \(c?.summary ?? "not acting")")
+    } catch { fail("\(error)") }
 
 case "audio":
     let mics = DispatchQueue(label: "probe")
@@ -87,29 +97,49 @@ case "watch":
         }
         _ = signals
 
-        log("watching \(watcher.history.path)\(dryRun ? " (dry run)" : "")\(noDuck || dryRun ? "" : ", ducking on \(AudioDevices.outputName())")")
+        // Jev handles phrasings no grammar rule covers. Without a key, grammar only.
+        let jev = args.contains("--no-jev") ? nil : JevClassifier.fromKeychain()
+
+        log("watching \(watcher.history.path)\(dryRun ? " (dry run)" : "")\(noDuck || dryRun ? "" : ", ducking on \(AudioDevices.outputName())"), Jev \(jev == nil ? "off" : "on")")
         watcher.run { d in
             let heard = "\"\(d.text.prefix(80))\" app=\(d.app) url=\(d.url)"
-            switch Gate.precheck(d) {
-            case .skip(let why):
-                // Only show the text for things that looked like commands; the rest is private dictation.
-                log(why == "not a command" ? "skip: not a command (\(d.app))" : "skip: \(why)  \(heard)")
-            case .run(let command):
-                do {
-                    let before = try driver.state()
-                    switch Gate.check(command, video: before) {
-                    case .skip(let why):
-                        log("skip: \(why)  \(heard)")
-                    case .run:
-                        if dryRun {
-                            log("would run \(command.summary)  \(describe(before))")
-                        } else {
-                            log("\(command.summary) -> \(describe(try driver.apply(command)))  \(heard)")
-                        }
+            func execute(_ command: Command, video: ChromeDriver.VideoState?, via: String) throws {
+                switch Gate.check(command, video: video) {
+                case .skip(let why):
+                    log("skip: \(why)  \(heard)")
+                case .ask:
+                    break // check() never asks
+                case .run:
+                    if dryRun {
+                        log("would run \(command.summary) (\(via))  \(describe(video))")
+                    } else {
+                        log("\(command.summary) (\(via)) -> \(describe(try driver.apply(command)))  \(heard)")
                     }
-                } catch {
-                    log("error: \(error)")
                 }
+            }
+            do {
+                switch Gate.precheck(d) {
+                case .skip(let why):
+                    // Only show the text for things that looked like commands; the rest is private dictation.
+                    log(why == "not a command" ? "skip: not a command (\(d.app))" : "skip: \(why)  \(heard)")
+                case .run(let command):
+                    try execute(command, video: try driver.state(), via: "grammar")
+                case .ask:
+                    guard let jev else { log("skip: not a command (\(d.app))"); return }
+                    // Only a dictation into a tab that has a video is sent to Jev.
+                    guard let video = try driver.state() else { log("skip: not a command, no video (\(d.app))"); return }
+                    let started = Date()
+                    let answer = try jev.classify(d.text)
+                    let ms = Int(Date().timeIntervalSince(started) * 1000)
+                    let verdict = "jev \(answer.intent.rawValue) \(String(format: "%.2f", answer.confidence)) in \(ms) ms"
+                    guard let command = jev.command(for: answer, text: d.text) else {
+                        log("skip: \(verdict), not acting")
+                        return
+                    }
+                    try execute(command, video: video, via: verdict)
+                }
+            } catch {
+                log("error: \(error)")
             }
         }
     } catch { fail("\(error)") }

@@ -47,14 +47,27 @@ Headphones, AirPods and other outputs are left alone. If you change the volume y
 A dictation is treated as a command only when all three are true:
 
 1. The player has a video open, playing or paused (v1 asks Chrome's front tab; later macOS Now Playing via `mediaremote-adapter`).
-2. The whole utterance matches the command grammar, not just a phrase inside a longer sentence.
+2. The whole utterance matches the command grammar, or Jev classifies it as a command with confidence of at least 0.9.
 3. Wispr's target app is the player app.
 
 This keeps "go back 30 seconds" in a message you're dictating to another app from rewinding a lecture playing in the background.
 
-### 3. Command parser (v1)
+### 3. Understanding the command
 
-Fixed phrases only, no LLM:
+Two stages:
+
+1. **Grammar first.** Known phrasings match instantly and work offline. A phrase must match from first word to last, so a command phrase inside a longer sentence never triggers.
+2. **Jev for everything else.** When no rule matches, the dictation went into Chrome and the front tab has a video, the text is sent to [TypeSafe's Jev](https://openrouter.ai/blog/insights/what-is-jev/), a decision model that scores a fixed list of choices (seek back, jump to a position, faster, pause, not a command, ...) and returns a probability for each. LectureJockey acts only at confidence 0.9 or higher. Numbers ("30 seconds", "2x", "75%") are pulled from the text by code, never produced by the model. Adding a feature means adding a choice, not retraining.
+
+Only the text of that one dictation is sent, and only from a tab with a video. The key lives in the Keychain:
+
+```sh
+security add-generic-password -s LectureJockey -a typesafe -w   # prompts for the key
+.build/debug/lecturejockey classify "take me back like half a minute"
+LJ_JEV_EVAL=1 swift test --filter JevEval                       # the phrase list that sets the threshold
+```
+
+Grammar phrasings include:
 
 - Speed: "2x", "speed up", "slow down", "normal speed"
 - Seek: "go back 30 seconds", "skip ahead a minute"
@@ -90,7 +103,7 @@ swift build
 swift test
 ```
 
-In v1 the gate checks for a playing video by asking Chrome's front tab directly. The log prints the focused element after each command, which shows where Wispr's paste landed.
+`--no-jev` runs grammar only. In v1 the gate checks for a video by asking Chrome's front tab directly. The log prints the focused element after each command, which shows where Wispr's paste landed.
 
 ## Later
 

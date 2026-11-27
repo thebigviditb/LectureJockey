@@ -9,7 +9,7 @@ public enum CommandParser {
 
     public static func parse(_ text: String) -> Command? {
         let words = normalize(text)
-        guard !words.isEmpty, words.count <= 12 else { return nil }
+        guard !words.isEmpty else { return nil }
         let s = words.joined(separator: " ")
 
         if let c = parsePlayPause(s) { return c }
