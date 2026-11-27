@@ -32,8 +32,9 @@ public enum Gate {
     }
 
     /// Check 4, given what the player reports.
-    public static func check(_ command: Command, video: ChromeDriver.VideoState?) -> Decision {
+    public static func check(_ command: Command, video: ChromeDriver.VideoState?, supported: Bool = true) -> Decision {
         guard let video else { return .skip("no video in the front tab") }
+        guard supported else { return .skip("\(command.summary) is not possible for this embedded player") }
         if command == .play, video.playing { return .skip("already playing") }
         if command == .pause, !video.playing { return .skip("already paused") }
         return .run(command)

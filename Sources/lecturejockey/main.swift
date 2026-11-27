@@ -36,6 +36,7 @@ var args = Array(CommandLine.arguments.dropFirst())
 guard let sub = args.first else { print(usage); exit(2) }
 args.removeFirst()
 let driver = ChromeDriver()
+let router = PlayerRouter(chrome: driver)
 
 switch sub {
 case "parse":
@@ -43,7 +44,9 @@ case "parse":
     print(CommandParser.parse(text)?.summary ?? "not a command")
 
 case "state":
-    do { print(describe(try driver.state())) } catch { fail("\(error)") }
+    do {
+        if let t = try router.resolve() { print("[\(t.driver.name)] \(describe(t.video))") } else { print("no video") }
+    } catch { fail("\(error)") }
 
 case "classify":
     let text = args.joined(separator: " ")
@@ -63,7 +66,11 @@ case "audio":
 case "do":
     let text = args.joined(separator: " ")
     guard let c = CommandParser.parse(text) else { fail("not a command: \(text)") }
-    do { print("\(c.summary) -> \(describe(try driver.apply(c)))") } catch { fail("\(error)") }
+    do {
+        guard let t = try router.resolve() else { fail("no video") }
+        guard t.driver.supports(c) else { fail("\(c.summary) is not possible for this embedded player") }
+        print("[\(t.driver.name)] \(c.summary) -> \(describe(try t.driver.apply(c)))")
+    } catch { fail("\(error)") }
 
 case "watch":
     let dryRun = args.contains("--dry-run")
@@ -100,20 +107,22 @@ case "watch":
         // Jev handles phrasings no grammar rule covers. Without a key, grammar only.
         let jev = args.contains("--no-jev") ? nil : JevClassifier.fromKeychain()
 
-        log("watching \(watcher.history.path)\(dryRun ? " (dry run)" : "")\(noDuck || dryRun ? "" : ", ducking on \(AudioDevices.outputName())"), Jev \(jev == nil ? "off" : "on")")
+        log("watching \(watcher.history.path)\(dryRun ? " (dry run)" : "")\(noDuck || dryRun ? "" : ", ducking on \(AudioDevices.outputName())"), Jev \(jev == nil ? "off" : "on"), Now Playing fallback \(router.nowPlaying == nil ? "off (brew install media-control)" : "on")")
         watcher.run { d in
             let heard = "\"\(d.text.prefix(80))\" app=\(d.app) url=\(d.url)"
-            func execute(_ command: Command, video: ChromeDriver.VideoState?, via: String) throws {
-                switch Gate.check(command, video: video) {
+            func execute(_ command: Command, on target: (driver: PlayerDriver, video: ChromeDriver.VideoState)?, via: String) throws {
+                let player = target.map { " [\($0.driver.name)]" } ?? ""
+                switch Gate.check(command, video: target?.video, supported: target?.driver.supports(command) ?? true) {
                 case .skip(let why):
-                    log("skip: \(why)  \(heard)")
+                    log("skip: \(why)\(player)  \(heard)")
                 case .ask:
                     break // check() never asks
                 case .run:
+                    guard let target else { return }
                     if dryRun {
-                        log("would run \(command.summary) (\(via))  \(describe(video))")
+                        log("would run \(command.summary) (\(via))\(player)  \(describe(target.video))")
                     } else {
-                        log("\(command.summary) (\(via)) -> \(describe(try driver.apply(command)))  \(heard)")
+                        log("\(command.summary) (\(via))\(player) -> \(describe(try target.driver.apply(command)))  \(heard)")
                     }
                 }
             }
@@ -123,11 +132,11 @@ case "watch":
                     // Only show the text for things that looked like commands; the rest is private dictation.
                     log(why == "not a command" ? "skip: not a command (\(d.app))" : "skip: \(why)  \(heard)")
                 case .run(let command):
-                    try execute(command, video: try driver.state(), via: "grammar")
+                    try execute(command, on: try router.resolve(), via: "grammar")
                 case .ask:
                     guard let jev else { log("skip: not a command (\(d.app))"); return }
-                    // Only a dictation into a tab that has a video is sent to Jev.
-                    guard let video = try driver.state() else { log("skip: not a command, no video (\(d.app))"); return }
+                    // Only a dictation into Chrome while it has a video is sent to Jev.
+                    guard let target = try router.resolve() else { log("skip: not a command, no video (\(d.app))"); return }
                     let started = Date()
                     let answer = try jev.classify(d.text)
                     let ms = Int(Date().timeIntervalSince(started) * 1000)
@@ -136,7 +145,7 @@ case "watch":
                         log("skip: \(verdict), not acting")
                         return
                     }
-                    try execute(command, video: video, via: verdict)
+                    try execute(command, on: target, via: verdict)
                 }
             } catch {
                 log("error: \(error)")

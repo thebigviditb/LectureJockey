@@ -85,7 +85,10 @@ The agent picks a driver for whichever app is playing.
 | QuickTime | AppleScript | yes | yes | yes |
 | IINA | mpv control socket | yes | yes | yes |
 | VLC | AppleScript | yes | yes | yes |
+| Video embedded from another domain (SproutVideo, Vimeo, Wistia) | macOS Now Playing via `media-control` (built) | no | yes | yes |
 | Anything else (incl. Firefox) | MediaRemote | usually no | yes | yes |
+
+LectureJockey decides the driver before acting: Chrome's JavaScript when the front tab has a video it can reach (everything works, including speed), else macOS Now Playing when Chrome is what's playing (play, pause and seeking; Chrome does not accept speed changes that way). Now Playing needs `brew install media-control`, which works around Apple's macOS 15.4 restriction through the system Perl; it relies on a private framework, so a macOS update may break it. Media from other apps (Spotify, Music) is never touched.
 
 The browser drivers need "Allow JavaScript from Apple Events" turned on (Chrome: View > Developer; Safari: Develop menu).
 
