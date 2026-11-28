@@ -28,15 +28,45 @@ public protocol ModelBackend: Sendable {
     func complete(_ request: ModelRequest) throws -> ModelReply
 }
 
-/// Choosing a backend from the environment (set by setup in LectureJockey's config):
-///   LJ_BACKEND=bedrock   (default) LJ_AWS_PROFILE, LJ_AWS_REGION, LJ_MODEL
-///   LJ_BACKEND=anthropic ANTHROPIC_API_KEY (or the Keychain item LectureJockey/anthropic), LJ_MODEL
-///   LJ_BACKEND=ollama    LJ_OLLAMA_URL (default http://127.0.0.1:11434), LJ_MODEL
+/// Settings: KEY=VALUE lines in ~/Library/Application Support/LectureJockey/config
+/// (written by setup), overridden by environment variables of the same name.
+public enum Settings {
+    public static let file = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/LectureJockey/config")
+
+    public static func load(file: URL = Settings.file, environment: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+        var values = parse((try? String(contentsOf: file, encoding: .utf8)) ?? "")
+        for (k, v) in environment where k.hasPrefix("LJ_") || k == "ANTHROPIC_API_KEY" { values[k] = v }
+        return values
+    }
+
+    /// Ignores blank lines and # comments; values may be quoted.
+    static func parse(_ text: String) -> [String: String] {
+        var out: [String: String] = [:]
+        for raw in text.split(whereSeparator: \.isNewline) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, !line.hasPrefix("#"), let eq = line.firstIndex(of: "=") else { continue }
+            let key = line[..<eq].trimmingCharacters(in: .whitespaces)
+            var value = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+            if value.count >= 2, let f = value.first, f == value.last, f == "\"" || f == "'" { value = String(value.dropFirst().dropLast()) }
+            if !key.isEmpty { out[key] = value }
+        }
+        return out
+    }
+}
+
+/// Choosing a backend from settings:
+///   LJ_BACKEND=ollama    (default) LJ_OLLAMA_URL (default http://127.0.0.1:11434), LJ_MODEL (default qwen3:4b-instruct)
+///   LJ_BACKEND=anthropic ANTHROPIC_API_KEY, or the Keychain item LectureJockey/anthropic; LJ_MODEL (default claude-haiku-5-5)
+///   LJ_BACKEND=bedrock   LJ_AWS_PROFILE (default "default"), LJ_AWS_REGION (default us-west-2), LJ_MODEL
+///   LJ_BACKEND=none      grammar only
 public enum Backends {
-    public static func fromEnvironment(_ env: [String: String] = ProcessInfo.processInfo.environment) throws -> ModelBackend {
-        switch env["LJ_BACKEND"] ?? "bedrock" {
+    public static func fromEnvironment(_ env: [String: String] = Settings.load()) throws -> ModelBackend? {
+        switch env["LJ_BACKEND"] ?? "ollama" {
+        case "none":
+            return nil
         case "bedrock":
-            let creds = try AWSCredentials.fromProfile(env["LJ_AWS_PROFILE"] ?? "intension")
+            let creds = try AWSCredentials.fromProfile(env["LJ_AWS_PROFILE"] ?? "default")
             return BedrockBackend(client: BedrockClient(credentials: creds, region: env["LJ_AWS_REGION"] ?? "us-west-2"),
                                   model: env["LJ_MODEL"] ?? BedrockBackend.defaultModel)
         case "anthropic":
@@ -58,7 +88,7 @@ public enum BackendError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case .missingKey: return "LJ_BACKEND=anthropic needs ANTHROPIC_API_KEY or the Keychain item LectureJockey/anthropic"
-        case .unknown(let b): return "unknown LJ_BACKEND \(b) (bedrock, anthropic or ollama)"
+        case .unknown(let b): return "unknown LJ_BACKEND \(b) (ollama, anthropic, bedrock or none)"
         case .http(let who, let code, let body): return "\(who) HTTP \(code): \(body)"
         case .badResponse(let who): return "\(who) returned an unexpected response"
         }

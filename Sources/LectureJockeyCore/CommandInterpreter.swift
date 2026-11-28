@@ -18,9 +18,9 @@ public struct CommandInterpreter: Sendable {
         self.backend = backend
     }
 
-    /// The backend LJ_BACKEND names (bedrock, anthropic or ollama; see `Backends`).
-    public static func fromEnvironment(_ env: [String: String] = ProcessInfo.processInfo.environment) throws -> CommandInterpreter {
-        CommandInterpreter(backend: try Backends.fromEnvironment(env))
+    /// The backend the settings name (see `Backends`); nil when LJ_BACKEND=none.
+    public static func fromEnvironment(_ env: [String: String] = Settings.load()) throws -> CommandInterpreter? {
+        try Backends.fromEnvironment(env).map(CommandInterpreter.init(backend:))
     }
 
     /// The transcript and title for the video a driver is playing: YouTube by the front

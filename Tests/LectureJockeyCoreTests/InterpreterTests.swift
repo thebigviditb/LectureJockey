@@ -165,7 +165,7 @@ struct InterpreterEval {
     ]
 
     @Test func everyPhraseDoesWhatItShould() async throws {
-        let interpreter = try CommandInterpreter.fromEnvironment()
+        let interpreter = try #require(try CommandInterpreter.fromEnvironment(), "LJ_BACKEND=none")
         let store = TranscriptStore()
         @Sendable func run(_ c: Case) -> (failure: String?, ms: Int) {
             let t = c.transcript.flatMap { store.load($0) }
@@ -198,5 +198,32 @@ struct InterpreterEval {
         print("EVAL \(interpreter.model): \(Self.cases.count - failures.count)/\(Self.cases.count) correct, median \(median) ms, max \(times.last ?? 0) ms")
         for f in failures { print("EVAL FAIL \(f)") }
         #expect(failures.isEmpty, "\(failures.count) of \(Self.cases.count) failed:\n\(failures.joined(separator: "\n"))")
+    }
+}
+
+struct SettingsTests {
+    @Test func readsKeyValueLinesAndEnvironmentWins() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("lj-config-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try """
+            # written by setup
+            LJ_BACKEND=bedrock
+            LJ_AWS_PROFILE = "work"
+
+            LJ_MODEL='us.anthropic.claude-haiku-5-5'
+            not a setting
+            """.write(to: file, atomically: true, encoding: .utf8)
+        let s = Settings.load(file: file, environment: ["LJ_AWS_PROFILE": "override", "HOME": "/x"])
+        #expect(s["LJ_BACKEND"] == "bedrock")
+        #expect(s["LJ_AWS_PROFILE"] == "override", "an environment variable beats the file")
+        #expect(s["LJ_MODEL"] == "us.anthropic.claude-haiku-5-5")
+        #expect(s["HOME"] == nil, "only LectureJockey's own variables are taken from the environment")
+    }
+
+    @Test func defaultsToTheLocalModelAndNoneMeansGrammarOnly() throws {
+        let local = try #require(try Backends.fromEnvironment([:]))
+        #expect(local.label == "ollama qwen3:4b-instruct")
+        #expect(try Backends.fromEnvironment(["LJ_BACKEND": "none"]) == nil)
+        #expect(throws: BackendError.self) { try Backends.fromEnvironment(["LJ_BACKEND": "gpt"]) }
     }
 }

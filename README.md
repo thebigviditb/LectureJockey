@@ -59,16 +59,23 @@ This keeps "go back 30 seconds" in a message you're dictating to another app fro
 Two stages:
 
 1. **Grammar first.** Known phrasings match instantly and work offline. A phrase must match from first word to last, so a command phrase inside a longer sentence never triggers.
-2. **Claude for everything else.** When no rule matches, the dictation went into Chrome and the front tab has a video, it goes to Claude Haiku on Amazon Bedrock with the video's transcript (when there is one) and a set of tools: `set_rate`, `change_rate`, `seek_by`, `seek_to`, `seek_to_line`, `pause`, `play` and `no_action`. The model answers only with tool calls, so "skip the intro", "go back to where he explains Dirichlet's theorem" or "skip to the part about pi approximations and play it at 1.5x" work, and a new feature is a new tool. For content it names a transcript line, and the line's start time comes from the transcript file, never from the model. Every call is validated; out-of-range ones are dropped.
+2. **A model for everything else.** When no rule matches, the dictation went into Chrome and the front tab has a video, it goes to the configured model (Claude Haiku, or a local model) with the video's transcript (when there is one) and a set of tools: `set_rate`, `change_rate`, `seek_by`, `seek_to`, `seek_to_line`, `pause`, `play` and `no_action`. The model answers only with tool calls, so "skip the intro", "go back to where he explains Dirichlet's theorem" or "skip to the part about pi approximations and play it at 1.5x" work, and a new feature is a new tool. For content it names a transcript line, and the line's start time comes from the transcript file, never from the model. Every call is validated; out-of-range ones are dropped.
 
 The instructions and transcript come before a cache point, so later commands on the same video read them from the prompt cache (Haiku 4.5 caches prompts over 4096 tokens, Haiku 5.5 over 512). On a one-hour lecture a command costs about $0.014 uncached and $0.002 cached on Haiku 4.5, a tenth of that on Haiku 5.5. Only that one dictation's text and the transcript are sent.
 
-Credentials come from an `aws` CLI profile; requests are signed with SigV4 in Swift (no SDK).
+The model is chosen in `~/Library/Application Support/LectureJockey/config` (written by setup; environment variables of the same name win):
+
+| `LJ_BACKEND` | Model | Accuracy on the phrase list | Cost |
+|---|---|---|---|
+| `anthropic` | your own API key (`ANTHROPIC_API_KEY`, or Keychain item `LectureJockey`/`anthropic`), default `claude-haiku-5-5` | best (Haiku 4.5: 28/28) | about $0.0002-0.0014 per command the grammar does not match |
+| `bedrock` | Claude on Amazon Bedrock through an `aws` CLI profile (`LJ_AWS_PROFILE`, `LJ_AWS_REGION`, `LJ_MODEL`); requests signed with SigV4 in Swift | best (Haiku 4.5: 28/28) | same as above on Haiku 5.5 |
+| `ollama` (default) | local Qwen3 4B Instruct through Ollama (`LJ_MODEL`, `LJ_OLLAMA_URL`) | 24/28: fine for commands, weaker at topic jumps | free; 2.5 GB download, ~4-5 GB of memory while in use, unloaded after 5 idle minutes |
+| `none` | grammar only | fixed phrases only | free |
 
 ```sh
-LJ_AWS_PROFILE=intension LJ_AWS_REGION=us-west-2 LJ_MODEL=us.anthropic.claude-haiku-4-5-20251001-v1:0   # the defaults
 .build/debug/lecturejockey interpret --transcript youtube:EK32jo7i5LQ "skip the intro"   # what it would do
 LJ_LLM_EVAL=1 swift test --filter InterpreterEval                                         # the live phrase list
+LJ_BACKEND=ollama LJ_LLM_EVAL=1 LJ_EVAL_SERIAL=1 swift test --filter InterpreterEval       # same, one at a time, on the local model
 ```
 
 **Going back to where you were.** Every jump (to a topic, a time, a percentage, or by an amount) records the position it left, like a browser's back button. "Go back to where I was", "take me back", "back to where I left off" or "undo that" return there instantly; a bare "okay, go back" or "okay I'm good with this" goes to the model, which sees the previous position and how long ago you left it. Returning uses that point up, so saying it again steps further back. With no earlier jump, a bare "go back" rewinds about 10 seconds. One history per video.

@@ -77,7 +77,7 @@ case "interpret":
             guard let target = try router.resolve() else { fail("no video; pass --transcript KEY") }
             context = CommandInterpreter.context(for: target)
         }
-        let interpreter = try CommandInterpreter.fromEnvironment()
+        guard let interpreter = try CommandInterpreter.fromEnvironment() else { fail("LJ_BACKEND=none: no model configured") }
         let r = try interpreter.interpret(text, context: context!)
         print("calls: \(r.calls.joined(separator: ", "))")
         print("-> \(r.commands.isEmpty ? "nothing" : r.commands.map(\.summary).joined(separator: ", "))\(r.notes.isEmpty ? "" : "  (\(r.notes.joined(separator: "; ")))")")
