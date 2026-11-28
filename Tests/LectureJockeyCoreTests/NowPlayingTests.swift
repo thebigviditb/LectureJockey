@@ -48,6 +48,19 @@ struct NowPlayingTests {
         #expect(Gate.check(.seek(by: -15), video: v, supported: true) == .run(.seek(by: -15)))
     }
 
+    /// media-control rejects "0.0" and "0.5" ("'.5' is not a valid number") and "1e-05";
+    /// a jump to the start of an embedded video used to fail on "0.0".
+    @Test func seekArgumentsAreNumbersMediaControlAccepts() {
+        #expect(NowPlayingDriver.seekArgument(0) == "0")
+        #expect(NowPlayingDriver.seekArgument(0.65) == "0")
+        #expect(NowPlayingDriver.seekArgument(0.00001) == "0")
+        #expect(NowPlayingDriver.seekArgument(1) == "1.000")
+        #expect(NowPlayingDriver.seekArgument(3.1074851535720827) == "3.107")
+        #expect(NowPlayingDriver.seekArgument(665.4) == "665.400")
+        #expect(NowPlayingDriver.seekArgument(.nan) == "0")
+        #expect(NowPlayingDriver.seekArgument(.infinity) == "0")
+    }
+
     @Test func routerLeavesOutAMissingTool() {
         #expect(PlayerRouter(nowPlaying: NowPlayingDriver(executable: "/nonexistent")).nowPlaying == nil)
     }

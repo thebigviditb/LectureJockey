@@ -61,7 +61,7 @@ public struct NowPlayingDriver: PlayerDriver {
         // requested rather than re-reading a stale value.
         func seek(_ t: Double) throws -> ChromeDriver.VideoState {
             let target = max(0, min(end, t))
-            try run(["seek", String(target)])
+            try run(["seek", Self.seekArgument(target)])
             return .init(playing: s.playing, rate: s.rate, time: target, duration: s.duration, activeElement: "")
         }
         switch command {
@@ -79,6 +79,14 @@ public struct NowPlayingDriver: PlayerDriver {
         case .setRate, .changeRate: throw NowPlayingError.unsupported(command)
         case .returnToPrevious: throw DriverError.unresolved(command)
         }
+    }
+
+    /// media-control rejects numbers that start with "0." ("'.5' is not a valid number")
+    /// and scientific notation, so seconds are written as plain decimals with a "." in
+    /// every locale, and anything under one second becomes 0.
+    static func seekArgument(_ seconds: Double) -> String {
+        guard seconds >= 1, seconds.isFinite else { return "0" }
+        return String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), seconds)
     }
 
     // MARK: - media-control
