@@ -49,7 +49,7 @@ Headphones, AirPods and other outputs are left alone. If you change the volume y
 A dictation is treated as a command only when all three are true:
 
 1. The player has a video open, playing or paused (v1 asks Chrome's front tab; later macOS Now Playing via `mediaremote-adapter`).
-2. The whole utterance matches the command grammar, or Jev classifies it as a command with confidence of at least 0.9.
+2. The whole utterance matches the command grammar, or Claude calls a player tool for it (not `no_action`).
 3. Wispr's target app is the player app.
 
 This keeps "go back 30 seconds" in a message you're dictating to another app from rewinding a lecture playing in the background.
@@ -59,14 +59,16 @@ This keeps "go back 30 seconds" in a message you're dictating to another app fro
 Two stages:
 
 1. **Grammar first.** Known phrasings match instantly and work offline. A phrase must match from first word to last, so a command phrase inside a longer sentence never triggers.
-2. **Jev for everything else.** When no rule matches, the dictation went into Chrome and the front tab has a video, the text is sent to [TypeSafe's Jev](https://openrouter.ai/blog/insights/what-is-jev/), a decision model that scores a fixed list of choices (seek back, jump to a position, faster, pause, not a command, ...) and returns a probability for each. LectureJockey acts only at confidence 0.9 or higher. Numbers ("30 seconds", "2x", "75%") are pulled from the text by code, never produced by the model. Adding a feature means adding a choice, not retraining.
+2. **Claude for everything else.** When no rule matches, the dictation went into Chrome and the front tab has a video, it goes to Claude Haiku on Amazon Bedrock with the video's transcript (when there is one) and a set of tools: `set_rate`, `change_rate`, `seek_by`, `seek_to`, `seek_to_line`, `pause`, `play` and `no_action`. The model answers only with tool calls, so "skip the intro", "go back to where he explains Dirichlet's theorem" or "skip to the part about pi approximations and play it at 1.5x" work, and a new feature is a new tool. For content it names a transcript line, and the line's start time comes from the transcript file, never from the model. Every call is validated; out-of-range ones are dropped.
 
-Only the text of that one dictation is sent, and only from a tab with a video. The key lives in the Keychain:
+The instructions and transcript come before a cache point, so later commands on the same video read them from the prompt cache (Haiku 4.5 caches prompts over 4096 tokens, Haiku 5.5 over 512). On a one-hour lecture a command costs about $0.014 uncached and $0.002 cached on Haiku 4.5, a tenth of that on Haiku 5.5. Only that one dictation's text and the transcript are sent.
+
+Credentials come from an `aws` CLI profile; requests are signed with SigV4 in Swift (no SDK).
 
 ```sh
-security add-generic-password -s LectureJockey -a typesafe -w   # prompts for the key
-.build/debug/lecturejockey classify "take me back like half a minute"
-LJ_JEV_EVAL=1 swift test --filter JevEval                       # the phrase list that sets the threshold
+LJ_AWS_PROFILE=intension LJ_AWS_REGION=us-west-2 LJ_MODEL=us.anthropic.claude-haiku-4-5-20251001-v1:0   # the defaults
+.build/debug/lecturejockey interpret --transcript youtube:EK32jo7i5LQ "skip the intro"   # what it would do
+LJ_LLM_EVAL=1 swift test --filter InterpreterEval                                         # the live phrase list
 ```
 
 Grammar phrasings include:
@@ -108,7 +110,7 @@ swift build
 swift test
 ```
 
-`--no-jev` runs grammar only. In v1 the gate checks for a video by asking Chrome's front tab directly. The log prints the focused element after each command, which shows where Wispr's paste landed.
+`--no-llm` runs grammar only. In v1 the gate checks for a video by asking Chrome's front tab directly. The log prints the focused element after each command, which shows where Wispr's paste landed.
 
 ## Transcripts
 

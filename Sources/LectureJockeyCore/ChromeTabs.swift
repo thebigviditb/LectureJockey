@@ -27,6 +27,17 @@ public enum ChromeTabs {
         }
     }
 
+    /// URL of the front window's active tab, or nil when Chrome has no window.
+    public static func frontURL() throws -> String? {
+        let out = try AppleScript.run("""
+            tell application id "\(ChromeDriver.bundleID)"
+                if (count of windows) = 0 then return ""
+                return URL of active tab of front window
+            end tell
+            """)
+        return out.isEmpty ? nil : out
+    }
+
     /// Runs `js` in one tab and returns its result. Chrome's ids exceed AppleScript's
     /// integer range, so they are matched as text. The script is passed as an argument,
     /// never spliced into AppleScript source.
