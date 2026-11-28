@@ -5,7 +5,7 @@ setvbuf(stdout, nil, _IOLBF, 0)
 
 let usage = """
     usage:
-      lecturejockey watch [--dry-run] [--verbose] [--no-duck] [--no-jev] [--dip-level PERCENT]
+      lecturejockey watch [--dry-run] [--verbose] [--no-duck] [--no-jev] [--no-transcripts] [--dip-level PERCENT]
                                         act on Wispr Flow dictations while a video plays;
                                         lowers the video (default 10%) while Wispr records on speakers
       lecturejockey parse <text>        show what a phrase parses to
@@ -15,6 +15,9 @@ let usage = """
       lecturejockey audio               show the output device and whether a mic is in use
       lecturejockey tap-test [PERCENT] [SECONDS]
                                         lower all of Chrome's audio (default 10%, 4 s) to hear a level
+      lecturejockey transcript fetch    save the transcript of the YouTube video playing (or in front)
+      lecturejockey transcript list     list saved transcripts
+      lecturejockey transcript show KEY print a saved transcript with timestamps
     """
 
 /// "--dip-level 25" -> 0.25. Percent of the signal level, so 10 = 20 dB quieter.
@@ -71,6 +74,36 @@ case "audio":
     let m = MicMonitor(queue: mics) { _ in }
     mics.sync { m.start() }
     print("output: \(AudioDevices.outputName()) builtInSpeakers=\(AudioDevices.outputIsBuiltInSpeakers()) micInUse=\(m.anyRunning)")
+
+case "transcript":
+    let store = TranscriptStore()
+    func clock(_ s: Double) -> String {
+        let t = Int(s)
+        return t >= 3600 ? String(format: "%d:%02d:%02d", t / 3600, t / 60 % 60, t % 60) : String(format: "%d:%02d", t / 60, t % 60)
+    }
+    switch args.first {
+    case "fetch":
+        do {
+            let tabs = try ChromeTabs.all().filter { YouTubeTranscript.videoID(from: $0.url) != nil }
+            let playing = try tabs.first { try ChromeTabs.run(TranscriptAgent.isPlayingJS, in: $0) == "playing" }
+            guard let tab = playing ?? tabs.first else { fail("no YouTube video open in Chrome") }
+            let started = Date()
+            let t = try YouTubeTranscript().fetch(from: tab)
+            try store.save(t)
+            print("\(t.key) \"\(t.title)\": \(t.segments.count) lines, \(t.wordCount) words, \(clock(t.duration)) long, in \(Int(Date().timeIntervalSince(started) * 1000)) ms")
+            print(store.url(for: t.key).path)
+        } catch { fail("\(error)") }
+    case "list":
+        for t in store.all().sorted(by: { $0.updatedAt > $1.updatedAt }) {
+            print("\(t.key)  \(t.source.rawValue)  \(t.segments.count) lines  \(clock(t.duration))  \(t.title)")
+        }
+    case "show":
+        guard args.count > 1, let t = store.load(args[1]) else { fail("no transcript \(args.dropFirst().first ?? "")") }
+        print("\(t.title) (\(t.source.rawValue), \(clock(t.duration)))")
+        for s in t.segments { print("[\(clock(s.start))] \(s.text)") }
+    default:
+        print(usage); exit(2)
+    }
 
 case "tap-test":
     // Lowers all of Chrome's audio for a few seconds, as a dictation over an embedded player would.
@@ -133,7 +166,14 @@ case "watch":
         // Jev handles phrasings no grammar rule covers. Without a key, grammar only.
         let jev = args.contains("--no-jev") ? nil : JevClassifier.fromKeychain()
 
-        log("watching \(watcher.history.path)\(dryRun ? " (dry run)" : "")\(noDuck || dryRun ? "" : ", volume dip to \(Int(dipConfig.level * 100))% on built-in speakers (output now: \(AudioDevices.outputName()))"), Jev \(jev == nil ? "off" : "on"), Now Playing fallback \(router.nowPlaying == nil ? "off (brew install media-control)" : "on")")
+        // Save each YouTube video's transcript once, as soon as it starts playing.
+        let transcripts = TranscriptAgent(log: { log($0) })
+        let nowPlayingStream = router.nowPlaying.map { NowPlayingStream(executable: $0.executable) }
+        if !args.contains("--no-transcripts") {
+            nowPlayingStream?.start { transcripts.nowPlayingChanged($0) }
+        }
+
+        log("watching \(watcher.history.path)\(dryRun ? " (dry run)" : "")\(noDuck || dryRun ? "" : ", volume dip to \(Int(dipConfig.level * 100))% on built-in speakers (output now: \(AudioDevices.outputName()))"), Jev \(jev == nil ? "off" : "on"), Now Playing fallback \(router.nowPlaying == nil ? "off (brew install media-control)" : "on"), YouTube transcripts \(nowPlayingStream == nil || args.contains("--no-transcripts") ? "off" : "on")")
         watcher.run { d in
             let heard = "\"\(d.text.prefix(80))\" app=\(d.app) url=\(d.url)"
             func execute(_ command: Command, on target: (driver: PlayerDriver, video: ChromeDriver.VideoState)?, via: String) throws {

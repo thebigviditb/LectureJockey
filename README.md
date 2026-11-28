@@ -110,6 +110,19 @@ swift test
 
 `--no-jev` runs grammar only. In v1 the gate checks for a video by asking Chrome's front tab directly. The log prints the focused element after each command, which shows where Wispr's paste landed.
 
+## Transcripts
+
+Each video gets one transcript file in `~/Library/Application Support/LectureJockey/transcripts/`, in video time (seconds from the start): segments with start, end and text, plus the stretches of the video they cover.
+
+- **YouTube:** when a YouTube video starts playing, LectureJockey reads its transcript from YouTube's own "Show transcript" panel, once per video. It moves the panel off-screen before opening it, closes it after, and puts focus back, so nothing on the page changes (measured: player, side column, recommendations, scroll and focus identical before and after). The direct routes do not work: the JavaScript AppleScript runs cannot see the page's variables, caption downloads come back empty without a token only YouTube's player makes, and the `get_transcript` request answers `FAILED_PRECONDITION`. If YouTube's layout changes, the fetch fails instead of saving a wrong transcript.
+- **Everything else (next):** transcribed on this Mac from Chrome's audio while you watch, timed with Now Playing.
+
+```sh
+.build/debug/lecturejockey transcript fetch        # the YouTube video playing, or the first one open
+.build/debug/lecturejockey transcript list
+.build/debug/lecturejockey transcript show youtube:oZDzd8jpGWc
+```
+
 ## Later
 
 - Spoken jumps to a topic ("go back to where he talks about X"), using a timestamped transcript: page captions first, local Whisper as a fallback.

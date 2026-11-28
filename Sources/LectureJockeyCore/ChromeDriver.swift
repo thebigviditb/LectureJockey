@@ -166,18 +166,21 @@ public struct ChromeDriver: Sendable {
 }
 
 enum AppleScript {
-    static func run(_ source: String) throws -> String {
+    /// Runs `source`; `arguments` reach an `on run argv` handler as `item N of argv`.
+    static func run(_ source: String, arguments: [String] = []) throws -> String {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        p.arguments = ["-e", source]
+        p.arguments = ["-e", source] + arguments
         let out = Pipe(), err = Pipe()
         p.standardOutput = out
         p.standardError = err
         try p.run()
-        p.waitUntilExit()
+        // Read before waiting: a result larger than the pipe buffer (a long transcript)
+        // would otherwise block osascript forever.
         let o = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let e = String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        p.waitUntilExit()
         guard p.terminationStatus == 0 else {
-            let e = String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
             throw DriverError.appleScript(e.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return o.trimmingCharacters(in: .whitespacesAndNewlines)
