@@ -85,6 +85,13 @@ public struct NowPlayingDriver: PlayerDriver {
 
     struct Info {
         let state: ChromeDriver.VideoState
+        var title = ""
+    }
+
+    /// What Now Playing calls the video and how long it is, when the app playing is ours.
+    public func titleAndDuration() throws -> (title: String, duration: Double)? {
+        guard let info = try nowPlaying(), !info.title.isEmpty else { return nil }
+        return (info.title, info.state.duration)
     }
 
     /// Parses `media-control get`. Elapsed time is as of `timestamp`, so while playing
@@ -101,7 +108,8 @@ public struct NowPlayingDriver: PlayerDriver {
         let duration = obj["duration"] as? Double ?? 0
         if duration > 0 { elapsed = min(elapsed, duration) }
         return Info(state: .init(playing: playing, rate: rate > 0 ? rate : 1, time: elapsed,
-                                 duration: duration, activeElement: ""))
+                                 duration: duration, activeElement: ""),
+                    title: obj["title"] as? String ?? "")
     }
 
     private func nowPlaying() throws -> Info? {

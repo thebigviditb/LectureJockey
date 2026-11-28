@@ -31,10 +31,15 @@ public struct CommandInterpreter: Sendable {
     /// The transcript and title for the video a driver is playing: YouTube by the front
     /// tab's video ID. Other videos have none until live transcription exists.
     public static func context(for target: (driver: PlayerDriver, video: ChromeDriver.VideoState),
-                               history: PositionHistory? = nil, store: TranscriptStore = TranscriptStore()) -> Context {
+                               history: PositionHistory? = nil, nowPlaying: NowPlayingDriver? = nil,
+                               store: TranscriptStore = TranscriptStore()) -> Context {
         var transcript: Transcript?
         if target.driver is ChromeDriver, let url = try? ChromeTabs.frontURL(), let id = YouTubeTranscript.videoID(from: url) {
             transcript = store.load(YouTubeTranscript.key(for: id))
+        }
+        // Otherwise what live transcription has heard so far, by Now Playing's name for the video.
+        if transcript == nil, let np = nowPlaying, let current = try? np.titleAndDuration() {
+            transcript = store.load(Transcript.liveKey(title: current.title, duration: current.duration))
         }
         let v = target.video
         let point = history?.peek(video: PositionHistory.videoID(driver: target.driver.name, duration: v.duration))

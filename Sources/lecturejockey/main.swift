@@ -5,7 +5,7 @@ setvbuf(stdout, nil, _IOLBF, 0)
 
 let usage = """
     usage:
-      lecturejockey watch [--dry-run] [--verbose] [--no-duck] [--no-llm] [--no-transcripts] [--dip-level PERCENT]
+      lecturejockey watch [--dry-run] [--verbose] [--no-duck] [--no-llm] [--no-transcripts] [--no-live] [--dip-level PERCENT]
                                         act on Wispr Flow dictations while a video plays;
                                         lowers the video (default 10%) while Wispr records on speakers
       lecturejockey parse <text>        show what a phrase parses to
@@ -120,6 +120,37 @@ case "transcript":
         print(usage); exit(2)
     }
 
+case "listen":
+    // Transcribes Chrome's audio for a while and prints each line with its video time.
+    let seconds = args.first.flatMap(Double.init) ?? 30
+    guard let np = router.nowPlaying else { fail("needs media-control (brew install media-control)") }
+    final class ClockBox: @unchecked Sendable {
+        let lock = NSLock()
+        var clock = PlaybackClock()
+        func add(_ s: [String: Any]) { var c = PlaybackClock(); c.add(nowPlaying: s); lock.withLock { c.anchors.forEach { clock.add($0) } } }
+        func video(_ d: Date) -> Double? { lock.withLock { clock.videoTime(at: d) } }
+    }
+    let box = ClockBox()
+    let stream = NowPlayingStream(executable: np.executable)
+    stream.start { box.add($0) }
+    let transcriber = LiveTranscriber()
+    let done = DispatchSemaphore(value: 0)
+    Task {
+        do {
+            let started = Date()
+            try await transcriber.start(onHeard: { h in
+                let v = box.video(h.start).map { CommandInterpreter.clock($0) } ?? "paused"
+                print(String(format: "[%@] (+%.1fs heard) %@", v, h.start.timeIntervalSince(started), h.text))
+            }, onError: { print("error: \($0)") })
+            print("listening to Chrome for \(Int(seconds)) s")
+            try await Task.sleep(for: .seconds(seconds))
+            await transcriber.stop()
+        } catch { print("cannot listen: \(error)") }
+        done.signal()
+    }
+    done.wait()
+    stream.stop()
+
 case "tap-test":
     // Lowers all of Chrome's audio for a few seconds, as a dictation over an embedded player would.
     let percent = args.first.flatMap(Double.init) ?? Ducker.Config().level * 100
@@ -185,13 +216,19 @@ case "watch":
         }()
 
         // Save each YouTube video's transcript once, as soon as it starts playing.
+        // Everything else is transcribed on this Mac as it plays.
         let transcripts = TranscriptAgent(log: { log($0) })
+        let live = LiveTranscriptAgent(log: { log($0) })
+        let liveOn = !args.contains("--no-live")
         let nowPlayingStream = router.nowPlaying.map { NowPlayingStream(executable: $0.executable) }
         if !args.contains("--no-transcripts") {
-            nowPlayingStream?.start { transcripts.nowPlayingChanged($0) }
+            nowPlayingStream?.start { state in
+                transcripts.nowPlayingChanged(state)
+                if liveOn { live.nowPlayingChanged(state) }
+            }
         }
 
-        log("watching \(watcher.history.path)\(dryRun ? " (dry run)" : "")\(noDuck || dryRun ? "" : ", volume dip to \(Int(dipConfig.level * 100))% on built-in speakers (output now: \(AudioDevices.outputName()))"), model \(interpreter.map { $0.model } ?? "off"), Now Playing fallback \(router.nowPlaying == nil ? "off (brew install media-control)" : "on"), YouTube transcripts \(nowPlayingStream == nil || args.contains("--no-transcripts") ? "off" : "on")")
+        log("watching \(watcher.history.path)\(dryRun ? " (dry run)" : "")\(noDuck || dryRun ? "" : ", volume dip to \(Int(dipConfig.level * 100))% on built-in speakers (output now: \(AudioDevices.outputName()))"), model \(interpreter.map { $0.model } ?? "off"), Now Playing fallback \(router.nowPlaying == nil ? "off (brew install media-control)" : "on"), YouTube transcripts \(nowPlayingStream == nil || args.contains("--no-transcripts") ? "off" : "on"), live transcripts \(nowPlayingStream == nil || args.contains("--no-transcripts") || !liveOn ? "off" : "on")")
         // Where each jump came from, for "go back to where I was".
         let history = PositionHistory()
 
@@ -237,7 +274,7 @@ case "watch":
                     guard let interpreter else { log("skip: not a command (\(d.app))"); return }
                     // Only a dictation into Chrome while it has a video is sent to the model.
                     guard let target = try router.resolve() else { log("skip: not a command, no video (\(d.app))"); return }
-                    let context = CommandInterpreter.context(for: target, history: history)
+                    let context = CommandInterpreter.context(for: target, history: history, nowPlaying: router.nowPlaying)
                     let r = try interpreter.interpret(d.text, context: context)
                     let via = "model \(r.latencyMs) ms\(context.transcript == nil ? "" : ", transcript")"
                     guard !r.commands.isEmpty else {
