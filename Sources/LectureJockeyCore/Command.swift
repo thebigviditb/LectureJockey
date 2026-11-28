@@ -12,11 +12,15 @@ public enum Command: Equatable, Sendable {
     case seekTo(Double)
     /// Seek to a fraction of the video's length, 0...1 (0.5 = the middle).
     case seekToFraction(Double)
+    /// Return to where the last jump came from ("go back to where I was"). Resolved to a
+    /// `seekTo` from `PositionHistory` before it reaches a driver.
+    case returnToPrevious
     case pause
     case play
 
     public var summary: String {
         switch self {
+        case .returnToPrevious: return "return to previous position"
         case .setRate(let r): return "rate \(Self.format(r))x"
         case .changeRate(let d): return "rate \(d > 0 ? "+" : "")\(Self.format(d))"
         case .seek(let s): return "seek \(s > 0 ? "+" : "")\(Self.format(s))s"

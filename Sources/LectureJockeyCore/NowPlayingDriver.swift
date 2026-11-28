@@ -43,7 +43,7 @@ public struct NowPlayingDriver: PlayerDriver {
     public func supports(_ command: Command) -> Bool {
         switch command {
         case .setRate, .changeRate: return false
-        case .seek, .seekTo, .seekToFraction, .pause, .play: return true
+        case .seek, .seekTo, .seekToFraction, .pause, .play, .returnToPrevious: return true
         }
     }
 
@@ -77,6 +77,7 @@ public struct NowPlayingDriver: PlayerDriver {
             try run(["play"])
             return .init(playing: true, rate: s.rate, time: s.time, duration: s.duration, activeElement: "")
         case .setRate, .changeRate: throw NowPlayingError.unsupported(command)
+        case .returnToPrevious: throw DriverError.unresolved(command)
         }
     }
 

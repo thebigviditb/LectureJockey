@@ -12,10 +12,23 @@ public enum CommandParser {
         guard !words.isEmpty else { return nil }
         let s = words.joined(separator: " ")
 
+        if let c = parseReturn(s) { return c }
         if let c = parsePlayPause(s) { return c }
         if let c = parseRate(s) { return c }
         if let c = parseSeek(s) { return c }
         if let c = parseSeekTo(s) { return c }
+        return nil
+    }
+
+    // MARK: - Return to where you were
+
+    /// Unambiguous ways to say "undo the last jump". A bare "go back" is not here: it can
+    /// also mean "rewind a bit", so the model decides it from context.
+    private static func parseReturn(_ s: String) -> Command? {
+        let to = "(?:go |take me |bring me |jump |get me )?back (?:to )?where i (?:was|left off|came from|stopped)"
+        if s.wholeMatch("(?:\(to)|return to where i (?:was|left off)|take me back|where was i|undo (?:that|the jump|jump))(?: before)?") {
+            return .returnToPrevious
+        }
         return nil
     }
 

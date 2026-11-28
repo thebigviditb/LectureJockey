@@ -57,6 +57,8 @@ public struct ChromeDriver: Sendable {
             js = "v.pause();"
         case .play:
             js = "v.play();"
+        case .returnToPrevious:
+            throw DriverError.unresolved(command)
         }
         return try run(js)
     }
@@ -189,9 +191,12 @@ enum AppleScript {
 
 public enum DriverError: Error, CustomStringConvertible {
     case appleScript(String)
+    /// A command that must be turned into a concrete one first (returnToPrevious).
+    case unresolved(Command)
 
     public var description: String {
         switch self {
+        case .unresolved(let c): return "\(c.summary) must be resolved to a position before it reaches a player"
         case .appleScript(let m):
             if m.contains("turned off") {
                 return "Chrome blocks JavaScript from AppleScript. Turn on View > Developer > Allow JavaScript from Apple Events."

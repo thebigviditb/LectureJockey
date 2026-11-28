@@ -31,14 +31,16 @@ public struct CommandInterpreter: Sendable {
     /// The transcript and title for the video a driver is playing: YouTube by the front
     /// tab's video ID. Other videos have none until live transcription exists.
     public static func context(for target: (driver: PlayerDriver, video: ChromeDriver.VideoState),
-                               store: TranscriptStore = TranscriptStore()) -> Context {
+                               history: PositionHistory? = nil, store: TranscriptStore = TranscriptStore()) -> Context {
         var transcript: Transcript?
         if target.driver is ChromeDriver, let url = try? ChromeTabs.frontURL(), let id = YouTubeTranscript.videoID(from: url) {
             transcript = store.load(YouTubeTranscript.key(for: id))
         }
         let v = target.video
+        let point = history?.peek(video: PositionHistory.videoID(driver: target.driver.name, duration: v.duration))
         return Context(title: transcript?.title ?? "", duration: v.duration, position: v.time, rate: v.rate,
-                       playing: v.playing, transcript: transcript)
+                       playing: v.playing, transcript: transcript,
+                       returnPoint: point.map { ($0.time, Date().timeIntervalSince($0.at)) })
     }
 
     public struct Context: Sendable {
@@ -48,14 +50,18 @@ public struct CommandInterpreter: Sendable {
         public var rate: Double
         public var playing: Bool
         public var transcript: Transcript?
+        /// Where the last jump came from, and how many seconds ago it was made.
+        public var returnPoint: (time: Double, age: Double)?
 
-        public init(title: String, duration: Double, position: Double, rate: Double, playing: Bool, transcript: Transcript?) {
+        public init(title: String, duration: Double, position: Double, rate: Double, playing: Bool, transcript: Transcript?,
+                    returnPoint: (time: Double, age: Double)? = nil) {
             self.title = title
             self.duration = duration
             self.position = position
             self.rate = rate
             self.playing = playing
             self.transcript = transcript
+            self.returnPoint = returnPoint
         }
     }
 
@@ -92,6 +98,10 @@ public struct CommandInterpreter: Sendable {
         - When the speaker gives an explicit time, amount or speed ("jump to two minutes in", "back 30 \
         seconds", "2x"), use it directly; that needs no transcript. If they also say why ("skip the \
         intro, jump to two minutes in"), the time is how to do it, not a conflict.
+        - After a jump, "go back", "go back to where I was", "okay, I'm good" or "that's enough" usually \
+        mean: return to where they jumped from (return_to_previous). Use it only when a previous position \
+        is listed. "Go back" with an amount or a place ("go back 30 seconds", "go back to the start") is a \
+        normal seek. With no previous position, a bare "go back" means back about 10 seconds.
         - "A bit" is about 10 seconds; "a little faster/slower" is a step of 0.25.
         - If the request needs content the transcript does not cover, or there is no transcript, call \
         no_action with kind cannot_do and say what is missing. Never guess a time for content.
@@ -101,9 +111,14 @@ public struct CommandInterpreter: Sendable {
         - Always answer with at least one tool call, never with text alone.
         """
 
-    static func clock(_ s: Double) -> String {
+    public static func clock(_ s: Double) -> String {
         let t = Int(s.rounded(.down))
         return t >= 3600 ? String(format: "%d:%02d:%02d", t / 3600, t / 60 % 60, t % 60) : String(format: "%d:%02d", t / 60, t % 60)
+    }
+
+    static func ago(_ seconds: Double) -> String {
+        let s = Int(seconds.rounded())
+        return s < 60 ? "\(s) seconds ago" : s < 3600 ? "\(s / 60) minutes ago" : "\(s / 3600) hours ago"
     }
 
     static func transcriptBlock(_ context: Context) -> String {
@@ -116,7 +131,12 @@ public struct CommandInterpreter: Sendable {
     }
 
     static func requestBody(_ utterance: String, context: Context) -> [String: Any] {
-        let state = "Player: \(context.playing ? "playing" : "paused") at \(clock(context.position)) of \(clock(context.duration)), speed \(Command.format(context.rate))x. Video: \"\(context.title)\"."
+        var state = "Player: \(context.playing ? "playing" : "paused") at \(clock(context.position)) of \(clock(context.duration)), speed \(Command.format(context.rate))x. Video: \"\(context.title)\"."
+        if let p = context.returnPoint {
+            state += "\nPrevious position: \(clock(p.time)) (they jumped away from it \(ago(p.age)))."
+        } else {
+            state += "\nPrevious position: none."
+        }
         return [
             // A tool call is required: no_action covers "do nothing", so a text-only reply never happens.
             // Instructions and transcript first, then a cache point: they stay the same for
@@ -144,6 +164,8 @@ public struct CommandInterpreter: Sendable {
          "inputSchema": schema(["seconds": ["type": "number"]], required: ["seconds"])],
         ["name": "seek_to_line", "description": "Jump to the start of a transcript line, by its [number]. The only way to jump to content: a topic, an explanation, the end of the intro.",
          "inputSchema": schema(["line": ["type": "integer"]], required: ["line"])],
+        ["name": "return_to_previous", "description": "Go back to the previous position listed (where the last jump came from).",
+         "inputSchema": schema([:], required: [])],
         ["name": "pause", "description": "Pause playback.", "inputSchema": schema([:], required: [])],
         ["name": "play", "description": "Play or resume.", "inputSchema": schema([:], required: [])],
         ["name": "no_action", "description": "Do nothing: the text is not a request to the player, or the request cannot be done.",
@@ -178,6 +200,9 @@ public struct CommandInterpreter: Sendable {
                 if let segs = context.transcript?.segments, let i = number(call.input["line"]).map(Int.init), segs.indices.contains(i) {
                     out.commands.append(.seekTo(max(0, segs[i].start - leadIn)))
                 } else { out.notes.append("dropped seek_to_line: no such line") }
+            case "return_to_previous":
+                if context.returnPoint != nil { out.commands.append(.returnToPrevious) }
+                else { out.notes.append("dropped return_to_previous: no previous position") }
             case "pause": out.commands.append(.pause)
             case "play": out.commands.append(.play)
             case "no_action":

@@ -71,6 +71,8 @@ LJ_AWS_PROFILE=intension LJ_AWS_REGION=us-west-2 LJ_MODEL=us.anthropic.claude-ha
 LJ_LLM_EVAL=1 swift test --filter InterpreterEval                                         # the live phrase list
 ```
 
+**Going back to where you were.** Every jump (to a topic, a time, a percentage, or by an amount) records the position it left, like a browser's back button. "Go back to where I was", "take me back", "back to where I left off" or "undo that" return there instantly; a bare "okay, go back" or "okay I'm good with this" goes to the model, which sees the previous position and how long ago you left it. Returning uses that point up, so saying it again steps further back. With no earlier jump, a bare "go back" rewinds about 10 seconds. One history per video.
+
 Grammar phrasings include:
 
 - Speed: "2x", "speed up", "slow down", "normal speed"

@@ -192,10 +192,22 @@ case "watch":
         }
 
         log("watching \(watcher.history.path)\(dryRun ? " (dry run)" : "")\(noDuck || dryRun ? "" : ", volume dip to \(Int(dipConfig.level * 100))% on built-in speakers (output now: \(AudioDevices.outputName()))"), model \(interpreter.map { $0.model } ?? "off"), Now Playing fallback \(router.nowPlaying == nil ? "off (brew install media-control)" : "on"), YouTube transcripts \(nowPlayingStream == nil || args.contains("--no-transcripts") ? "off" : "on")")
+        // Where each jump came from, for "go back to where I was".
+        let history = PositionHistory()
+
         watcher.run { d in
             let heard = "\"\(d.text.prefix(80))\" app=\(d.app) url=\(d.url)"
-            func execute(_ command: Command, on target: (driver: PlayerDriver, video: ChromeDriver.VideoState)?, via: String) throws {
+            func execute(_ requested: Command, on target: (driver: PlayerDriver, video: ChromeDriver.VideoState)?, via: String) throws {
                 let player = target.map { " [\($0.driver.name)]" } ?? ""
+                let video = target.map { PositionHistory.videoID(driver: $0.driver.name, duration: $0.video.duration) } ?? ""
+                // A return becomes a jump to the recorded position, and uses that position up.
+                var command = requested
+                var returning: PositionHistory.Point?
+                if requested == .returnToPrevious {
+                    guard let point = history.peek(video: video) else { log("skip: no earlier position to go back to\(player)  \(heard)"); return }
+                    returning = point
+                    command = .seekTo(point.time)
+                }
                 switch Gate.check(command, video: target?.video, supported: target?.driver.supports(command) ?? true) {
                 case .skip(let why):
                     log("skip: \(why)\(player)  \(heard)")
@@ -203,11 +215,15 @@ case "watch":
                     break // check() never asks
                 case .run:
                     guard let target else { return }
+                    let label = returning == nil ? command.summary : "back to where you were, \(CommandInterpreter.clock(returning!.time))"
                     if dryRun {
-                        log("would run \(command.summary) (\(via))\(player)  \(describe(target.video))")
-                    } else {
-                        log("\(command.summary) (\(via))\(player) -> \(describe(try target.driver.apply(command)))  \(heard)")
+                        log("would run \(label) (\(via))\(player)  \(describe(target.video))")
+                        return
                     }
+                    let after = try target.driver.apply(command)
+                    if returning != nil { _ = history.popReturn(video: video) }
+                    else if PositionHistory.isJump(command) { history.recordJump(from: target.video.time, video: video) }
+                    log("\(label) (\(via))\(player) -> \(describe(after))  \(heard)")
                 }
             }
             do {
@@ -221,7 +237,7 @@ case "watch":
                     guard let interpreter else { log("skip: not a command (\(d.app))"); return }
                     // Only a dictation into Chrome while it has a video is sent to the model.
                     guard let target = try router.resolve() else { log("skip: not a command, no video (\(d.app))"); return }
-                    let context = CommandInterpreter.context(for: target)
+                    let context = CommandInterpreter.context(for: target, history: history)
                     let r = try interpreter.interpret(d.text, context: context)
                     let via = "model \(r.latencyMs) ms\(context.transcript == nil ? "" : ", transcript")"
                     guard !r.commands.isEmpty else {

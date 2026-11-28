@@ -108,6 +108,8 @@ struct InterpreterEval {
         let playing: Bool
         let check: @Sendable ([Command]) -> Bool
         let want: String
+        /// Where the last jump came from (seconds) and how long ago.
+        var returnPoint: (Double, Double)? = nil
     }
 
     static func near(_ c: Command?, seekTo target: Double, within: Double) -> Bool {
@@ -146,6 +148,15 @@ struct InterpreterEval {
               check: { (near($0.first, seekTo: 445, within: 25) || near($0.first, seekTo: 680, within: 25)) && $0.contains(.setRate(1.5)) },
               want: "seek to ~7:20 or ~11:20, rate 1.5x"),
         .init(text: "go to where he talks about quantum computing", transcript: prime, playing: true, check: { $0.isEmpty }, want: "nothing (not in the video)"),
+        // Returning to where they jumped from (after a jump from 14:02, 90 seconds ago).
+        .init(text: "Okay, go back", transcript: prime, playing: true, check: { $0 == [.returnToPrevious] }, want: "return", returnPoint: (842, 90)),
+        .init(text: "okay I'm good with this", transcript: prime, playing: true, check: { $0 == [.returnToPrevious] }, want: "return", returnPoint: (842, 90)),
+        .init(text: "alright that's enough, take me back", transcript: prime, playing: true, check: { $0 == [.returnToPrevious] }, want: "return", returnPoint: (842, 90)),
+        .init(text: "go back 30 seconds", transcript: prime, playing: true, check: { $0 == [.seek(by: -30)] }, want: "seek -30", returnPoint: (842, 90)),
+        .init(text: "go back to the start", transcript: prime, playing: true, check: { $0 == [.seekTo(0)] }, want: "seek to 0", returnPoint: (842, 90)),
+        .init(text: "go back", transcript: nil, playing: true,
+              check: { if case .seek(let s)? = $0.first, $0.count == 1 { return (-15 ... -5).contains(s) } else { return false } },
+              want: "seek back ~10 (no previous position)"),
     ]
 
     @Test func everyPhraseDoesWhatItShould() async throws {
@@ -158,7 +169,8 @@ struct InterpreterEval {
                     let t = c.transcript.flatMap { store.load($0) }
                     if c.transcript != nil, t == nil { return "\"\(c.text)\": transcript \(c.transcript!) not saved; run transcript fetch" }
                     let ctx = CommandInterpreter.Context(title: t?.title ?? "A lecture", duration: t?.duration ?? 1340, position: 300,
-                                                         rate: 1, playing: c.playing, transcript: t)
+                                                         rate: 1, playing: c.playing, transcript: t,
+                                                         returnPoint: c.returnPoint.map { (time: $0.0, age: $0.1) })
                     do {
                         let r = try interpreter.interpret(c.text, context: ctx)
                         return c.check(r.commands) ? nil
