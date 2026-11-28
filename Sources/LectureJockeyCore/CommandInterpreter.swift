@@ -8,24 +8,19 @@ import Foundation
 /// The model never produces a timestamp for transcript content: it picks a line
 /// number, and the line's start time comes from the transcript file.
 public struct CommandInterpreter: Sendable {
-    public static let defaultModel = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
     /// Seek a little before the chosen line, so the sentence is heard from its start.
     public static let leadIn: Double = 1.5
 
-    public let client: BedrockClient
-    public let model: String
+    public let backend: ModelBackend
+    public var model: String { backend.label }
 
-    public init(client: BedrockClient, model: String = CommandInterpreter.defaultModel) {
-        self.client = client
-        self.model = model
+    public init(backend: ModelBackend) {
+        self.backend = backend
     }
 
-    /// Bedrock through an `aws` CLI profile: LJ_AWS_PROFILE (default "intension"),
-    /// LJ_AWS_REGION (default us-west-2), LJ_MODEL (default Haiku 4.5).
+    /// The backend LJ_BACKEND names (bedrock, anthropic or ollama; see `Backends`).
     public static func fromEnvironment(_ env: [String: String] = ProcessInfo.processInfo.environment) throws -> CommandInterpreter {
-        let creds = try AWSCredentials.fromProfile(env["LJ_AWS_PROFILE"] ?? "intension")
-        return CommandInterpreter(client: BedrockClient(credentials: creds, region: env["LJ_AWS_REGION"] ?? "us-west-2"),
-                                  model: env["LJ_MODEL"] ?? defaultModel)
+        CommandInterpreter(backend: try Backends.fromEnvironment(env))
     }
 
     /// The transcript and title for the video a driver is playing: YouTube by the front
@@ -80,7 +75,7 @@ public struct CommandInterpreter: Sendable {
     }
 
     public func interpret(_ utterance: String, context: Context) throws -> Result {
-        let reply = try client.converse(model: model, body: Self.requestBody(utterance, context: context))
+        let reply = try backend.complete(Self.request(utterance, context: context))
         var result = Self.commands(from: reply.toolUses, context: context)
         result.usage = reply.usage
         result.latencyMs = reply.latencyMs
@@ -135,22 +130,22 @@ public struct CommandInterpreter: Sendable {
         return "Transcript of \"\(t.title)\" (video time; covers \(covered)):\n" + lines.joined(separator: "\n")
     }
 
+    /// The Bedrock form of the request, as sent (kept for tests and debugging).
     static func requestBody(_ utterance: String, context: Context) -> [String: Any] {
+        BedrockBackend.body(request(utterance, context: context))
+    }
+
+    static func request(_ utterance: String, context: Context) -> ModelRequest {
         var state = "Player: \(context.playing ? "playing" : "paused") at \(clock(context.position)) of \(clock(context.duration)), speed \(Command.format(context.rate))x. Video: \"\(context.title)\"."
         if let p = context.returnPoint {
             state += "\nPrevious position: \(clock(p.time)) (they jumped away from it \(ago(p.age)))."
         } else {
             state += "\nPrevious position: none."
         }
-        return [
-            // A tool call is required: no_action covers "do nothing", so a text-only reply never happens.
-            // Instructions and transcript first, then a cache point: they stay the same for
-            // every command on this video, so later commands read them from the cache.
-            "system": [["text": instructions], ["text": transcriptBlock(context)], ["cachePoint": ["type": "default"]]],
-            "messages": [["role": "user", "content": [["text": "\(state)\nSpoken: \"\(utterance)\""]]]],
-            "toolConfig": ["tools": tools.map { ["toolSpec": $0] }, "toolChoice": ["any": [String: Any]()]],
-            "inferenceConfig": ["maxTokens": 400],
-        ]
+        // Instructions and transcript stay the same for every command on a video, so
+        // backends put them first, where a prompt cache can reuse them.
+        return ModelRequest(instructions: instructions, transcript: transcriptBlock(context),
+                            user: "\(state)\nSpoken: \"\(utterance)\"", tools: tools)
     }
 
     static func schema(_ properties: [String: [String: Any]], required: [String]) -> [String: Any] {
@@ -165,8 +160,9 @@ public struct CommandInterpreter: Sendable {
          "inputSchema": schema(["by": ["type": "number"]], required: ["by"])],
         ["name": "seek_by", "description": "Move by a number of seconds from the current position: negative goes back.",
          "inputSchema": schema(["seconds": ["type": "number"]], required: ["seconds"])],
-        ["name": "seek_to", "description": "Jump to a time the speaker says out loud, in seconds from the start (\"go to 5 minutes\", \"the middle\" = half the duration). Never for content or topics: use seek_to_line for those.",
-         "inputSchema": schema(["seconds": ["type": "number"]], required: ["seconds"])],
+        ["name": "seek_to", "description": "Jump to a time the speaker says out loud (\"go to 5 minutes\" = 5:00, \"the middle\" = half the duration). Never for content or topics: use seek_to_line for those.",
+         "inputSchema": schema(["time": ["type": "string", "description": "Time from the start as M:SS or H:MM:SS, e.g. 11:10 or 1:02:30. Plain seconds also work, e.g. 670."]],
+                               required: ["time"])],
         ["name": "seek_to_line", "description": "Jump to the start of a transcript line, by its [number]. The only way to jump to content: a topic, an explanation, the end of the intro.",
          "inputSchema": schema(["line": ["type": "integer"]], required: ["line"])],
         ["name": "return_to_previous", "description": "Go back to the previous position listed (where the last jump came from).",
@@ -179,6 +175,17 @@ public struct CommandInterpreter: Sendable {
     ]
 
     // MARK: - Tool calls to commands
+
+    /// "11:10" -> 670, "1:02:30" -> 3750, "670" or 670 -> 670; nil for anything else.
+    static func timeValue(_ v: Any?) -> Double? {
+        if let n = v as? NSNumber, !(v is Bool) { return n.doubleValue }
+        guard let s = (v as? String)?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }
+        let parts = s.split(separator: ":", omittingEmptySubsequences: false).map { Double($0) }
+        guard parts.count <= 3, parts.allSatisfy({ $0 != nil && $0! >= 0 }) else { return nil }
+        let values = parts.map { $0! }
+        if values.count > 1, values.dropFirst().contains(where: { $0 >= 60 }) { return nil }
+        return values.reduce(0) { $0 * 60 + $1 }
+    }
 
     /// Validates every call; anything out of range is dropped with a note rather than run.
     static func commands(from calls: [BedrockClient.ToolUse], context: Context) -> Result {
@@ -199,8 +206,9 @@ public struct CommandInterpreter: Sendable {
                 if let s = number(call.input["seconds"]), s != 0, abs(s) <= 6 * 3600 { out.commands.append(.seek(by: s)) }
                 else { out.notes.append("dropped seek_by") }
             case "seek_to":
-                if let s = number(call.input["seconds"]), s >= 0, s <= end { out.commands.append(.seekTo(s)) }
-                else { out.notes.append("dropped seek_to outside the video") }
+                // Small models think in minutes:seconds, so "11:10" is accepted as well as 670.
+                if let s = timeValue(call.input["time"] ?? call.input["seconds"]), s >= 0, s <= end { out.commands.append(.seekTo(s)) }
+                else { out.notes.append("dropped seek_to: not a time in the video") }
             case "seek_to_line":
                 if let segs = context.transcript?.segments, let i = number(call.input["line"]).map(Int.init), segs.indices.contains(i) {
                     out.commands.append(.seekTo(max(0, segs[i].start - leadIn)))

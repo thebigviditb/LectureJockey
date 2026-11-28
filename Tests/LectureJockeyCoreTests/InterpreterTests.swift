@@ -41,7 +41,10 @@ struct InterpreterMappingTests {
         let r = run([("seek_to_line", ["line": 2]), ("set_rate", ["rate": 1.5]), ("play", [:])])
         #expect(r.commands == [.seekTo(878 - CommandInterpreter.leadIn), .setRate(1.5), .play])
         #expect(run([("seek_by", ["seconds": -30])]).commands == [.seek(by: -30)])
-        #expect(run([("seek_to", ["seconds": 670])]).commands == [.seekTo(670)])
+        #expect(run([("seek_to", ["time": "11:10"])]).commands == [.seekTo(670)])
+        #expect(run([("seek_to", ["time": "670"])]).commands == [.seekTo(670)])
+        #expect(run([("seek_to", ["time": 670])]).commands == [.seekTo(670)])
+        #expect(run([("seek_to", ["seconds": 670])]).commands == [.seekTo(670)], "the old parameter name still works")
         #expect(run([("change_rate", ["by": 0.25])]).commands == [.changeRate(by: 0.25)])
         #expect(run([("pause", [:])]).commands == [.pause])
     }
@@ -55,8 +58,10 @@ struct InterpreterMappingTests {
     @Test func dropsCallsOutOfRange() {
         #expect(run([("seek_to_line", ["line": 99])]).commands.isEmpty)
         #expect(run([("set_rate", ["rate": 10])]).commands.isEmpty)
-        #expect(run([("seek_to", ["seconds": 5000])]).commands.isEmpty, "past the end of the video")
-        #expect(run([("seek_to", ["seconds": -5])]).commands.isEmpty)
+        #expect(run([("seek_to", ["time": "1:23:20"])]).commands.isEmpty, "past the end of the video")
+        #expect(run([("seek_to", ["time": "-5"])]).commands.isEmpty)
+        #expect(run([("seek_to", ["time": "11:75"])]).commands.isEmpty, "not a time")
+        #expect(run([("seek_to", ["time": "soon"])]).commands.isEmpty)
         #expect(run([("bogus", [:])]).notes == ["unknown tool bogus"])
     }
 
@@ -162,24 +167,36 @@ struct InterpreterEval {
     @Test func everyPhraseDoesWhatItShould() async throws {
         let interpreter = try CommandInterpreter.fromEnvironment()
         let store = TranscriptStore()
-        var failures: [String] = []
-        await withTaskGroup(of: String?.self) { group in
-            for c in Self.cases {
-                group.addTask {
-                    let t = c.transcript.flatMap { store.load($0) }
-                    if c.transcript != nil, t == nil { return "\"\(c.text)\": transcript \(c.transcript!) not saved; run transcript fetch" }
-                    let ctx = CommandInterpreter.Context(title: t?.title ?? "A lecture", duration: t?.duration ?? 1340, position: 300,
-                                                         rate: 1, playing: c.playing, transcript: t,
-                                                         returnPoint: c.returnPoint.map { (time: $0.0, age: $0.1) })
-                    do {
-                        let r = try interpreter.interpret(c.text, context: ctx)
-                        return c.check(r.commands) ? nil
-                            : "\"\(c.text)\": got [\(r.commands.map(\.summary).joined(separator: ", "))] \(r.notes), want \(c.want)"
-                    } catch { return "\"\(c.text)\": \(error)" }
-                }
-            }
-            for await f in group { if let f { failures.append(f) } }
+        @Sendable func run(_ c: Case) -> (failure: String?, ms: Int) {
+            let t = c.transcript.flatMap { store.load($0) }
+            if c.transcript != nil, t == nil { return ("\"\(c.text)\": transcript \(c.transcript!) not saved; run transcript fetch", 0) }
+            let ctx = CommandInterpreter.Context(title: t?.title ?? "A lecture", duration: t?.duration ?? 1340, position: 300,
+                                                 rate: 1, playing: c.playing, transcript: t,
+                                                 returnPoint: c.returnPoint.map { (time: $0.0, age: $0.1) })
+            let started = Date()
+            do {
+                let r = try interpreter.interpret(c.text, context: ctx)
+                let ms = Int(Date().timeIntervalSince(started) * 1000)
+                return (c.check(r.commands) ? nil
+                    : "\"\(c.text)\": got [\(r.commands.map(\.summary).joined(separator: ", "))] \(r.notes), want \(c.want)", ms)
+            } catch { return ("\"\(c.text)\": \(error)", 0) }
         }
+        var results: [(failure: String?, ms: Int)] = []
+        // LJ_EVAL_SERIAL=1 runs one phrase at a time, so times are what one user would see
+        // (a local model serves one request at a time anyway).
+        if ProcessInfo.processInfo.environment["LJ_EVAL_SERIAL"] == "1" {
+            for c in Self.cases { results.append(run(c)) }
+        } else {
+            await withTaskGroup(of: (failure: String?, ms: Int).self) { group in
+                for c in Self.cases { group.addTask { run(c) } }
+                for await r in group { results.append(r) }
+            }
+        }
+        let failures = results.compactMap(\.failure)
+        let times = results.map(\.ms).filter { $0 > 0 }.sorted()
+        let median = times.isEmpty ? 0 : times[times.count / 2]
+        print("EVAL \(interpreter.model): \(Self.cases.count - failures.count)/\(Self.cases.count) correct, median \(median) ms, max \(times.last ?? 0) ms")
+        for f in failures { print("EVAL FAIL \(f)") }
         #expect(failures.isEmpty, "\(failures.count) of \(Self.cases.count) failed:\n\(failures.joined(separator: "\n"))")
     }
 }
